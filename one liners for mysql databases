@@ -1,0 +1,11 @@
+####Copy tables using mysqldump from one mysql database to another , assuming source database is altx_template and destination is altx_lop
+mysql -uclientinit -p$PASS -h 172.20.0.199 --skip-column-names -e"show full tables in altx_template WHERE TABLE_TYPE LIKE 'BASE TABLE'"|awk '{print $1}'|xargs mysqldump -uclientinit -p$PASS -h 172.20.0.199 --skip-add-drop-table --no-create-db altx_template|mysql -uclientinit -p$PASS -h 172.20.0.199 --database altx_lop
+###Copy Views from one mysql database to another
+mysql -uclientinit -p$PASS -h 172.20.0.199 --skip-column-names -e"show full tables in altx_template WHERE TABLE_TYPE LIKE 'VIEW'"|awk '{print "show create view altx_template."$1"\\G;"}'|xargs -0I{} echo {}|mysql -uclientinit -p$PASS -h 172.20.0.199 |grep "Create View"|cut -d: -f2-|sed "s/ALGORITHM=UNDEFINED DEFINER=.*SQL SECURITY DEFINER//g"|awk '{print $0";"}'|sed "s/altx_template/altx_lop/g"|mysql -uclientinit -p$PASS -h 172.20.0.199
+
+####Tables sanity check between 2 mysql databases
+mysql -u$USER -p$PASS -h 172.20.0.199 --skip-column-names -e"show full tables in altx_template WHERE TABLE_TYPE LIKE 'BASE TABLE'"|awk '{print $1}'|awk '{print "show create table altx_template."$1"\\G;"}'|xargs -0I{} echo {}|mysql -u$USER -p$PASS -h 172.20.0.199|md5sum
+mysql -u$USER -p$PASS -h 172.20.0.199 --skip-column-names -e"show full tables in altx_lop WHERE TABLE_TYPE LIKE 'BASE TABLE'"|awk '{print $1}'|awk '{print "show create table altx_lop."$1"\\G;"}'|xargs -0I{} echo {}|mysql -u$USER -p$PASS -h 172.20.0.199|md5sum
+###View Sanity check between 2 mysql databases
+mysql -u$USER -p$PASS -h 172.20.0.199 --skip-column-names -e"show full tables in altx_template WHERE TABLE_TYPE LIKE 'VIEW'"|awk '{print "show create view "$1"\\G;"}'|xargs -0I{} echo {}|mysql -u$USER -p$PASS -h 172.20.0.199 --database altx_template|sed -n "/CREATE/,/^character_set_client/p"|sed "s/ALGORITHM=UNDEFINED DEFINER=.*SQL SECURITY DEFINER//g"|md5sum
+mysql -u$USER -p$PASS -h 172.20.0.199 --skip-column-names -e"show full tables in altx_lop WHERE TABLE_TYPE LIKE 'VIEW'"|awk '{print "show create view "$1"\\G;"}'|xargs -0I{} echo {}|mysql -u$USER -p$PASS -h 172.20.0.199 --database altx_lop|sed -n "/CREATE/,/^character_set_client/p"|sed "s/ALGORITHM=UNDEFINED DEFINER=.*SQL SECURITY DEFINER//g"|md5sum
