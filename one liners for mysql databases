@@ -2,6 +2,8 @@
 mysql -uclientinit -p$PASS -h 172.20.0.199 --skip-column-names -e"show full tables in altx_template WHERE TABLE_TYPE LIKE 'BASE TABLE'"|awk '{print $1}'|xargs mysqldump -uclientinit -p$PASS -h 172.20.0.199 --skip-add-drop-table --no-create-db altx_template|mysql -uclientinit -p$PASS -h 172.20.0.199 --database altx_lop
 ###Copy Views from one mysql database to another
 mysql -uclientinit -p$PASS -h 172.20.0.199 --skip-column-names -e"show full tables in altx_template WHERE TABLE_TYPE LIKE 'VIEW'"|awk '{print "show create view altx_template."$1"\\G;"}'|xargs -0I{} echo {}|mysql -uclientinit -p$PASS -h 172.20.0.199 |grep "Create View"|cut -d: -f2-|sed "s/ALGORITHM=UNDEFINED DEFINER=.*SQL SECURITY DEFINER//g"|awk '{print $0";"}'|sed "s/altx_template/altx_lop/g"|mysql -uclientinit -p$PASS -h 172.20.0.199
+Copy Views from one mysql database to another using mysqldump method
+mysql -u$USER -p$PASS -h 172.20.0.199 --skip-column-names -e"show full tables in altx_template WHERE TABLE_TYPE LIKE 'VIEW'"|awk '{print $1}'|xargs mysqldump -h 172.20.0.199 altx_template|mysql -u$USER -p$PASS -h 172.20.0.199 --database altx_lop
 
 ####Tables sanity check between 2 mysql databases
 mysql -u$USER -p$PASS -h 172.20.0.199 --skip-column-names -e"show full tables in altx_template WHERE TABLE_TYPE LIKE 'BASE TABLE'"|awk '{print $1}'|awk '{print "show create table altx_template."$1"\\G;"}'|xargs -0I{} echo {}|mysql -u$USER -p$PASS -h 172.20.0.199|md5sum
