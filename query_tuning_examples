@@ -1,0 +1,194 @@
+Original ( took 4+ hours )
+============================================================================================================================
+SELECT i.invoice_recurring_id,c.id
+       AS ID
+       ,
+       Concat(c.lname, ', ', c.fname)
+       AS Customer,
+       i.id
+       AS InvoiceID,
+       i.due_date
+       AS InvoiceDueDate,
+       Concat('$', IF(( i.created_at + interval 30 day ) > Now(), Round((SELECT
+                               SUM(( ili.gross_amount + (
+                                     ili.gross_amount * ili.sales_tax_rate *
+                                     .01 )
+                                         ))
+                                                                         FROM
+                               invoice_line_items ili
+                                                                         WHERE
+                               ili.invoice_id = i.id
+                               AND ili.status = 'active'), 2) -
+                   Round(
+                                 Ifnull(
+                   (SELECT SUM(pti.amount_used)
+                    FROM   payment_to_invoice pti
+                    WHERE  pti.invoice_id = i.id
+                           AND pti.status = 'active'
+                           AND pti.created_at <=
+                               Date_add(i.created_at,
+                               interval 30 day)), 0
+                                 ), 2), 0.00))
+       AS '0-30',
+       Concat('$', IF(i.created_at > Now() - interval 60 day
+                      AND i.created_at <= Now() - interval 30 day, Round((SELECT
+                   SUM(( ili.gross_amount + (
+                               ili.gross_amount * ili.sales_tax_rate *
+                   .01
+                   )
+                       ))
+                   FROM   invoice_line_items ili
+                   WHERE  ili.invoice_id = i.id
+                   AND ili.status = 'active'), 2) - Round(
+                   Ifnull((SELECT SUM(pti.amount_used)
+                   FROM   payment_to_invoice pti
+                   WHERE  pti.invoice_id = i.id
+                   AND pti.status = 'active'
+                   AND pti.created_at <= Date_add(i.created_at,
+                   interval 60 day)), 0
+                   ), 2), 0.00))
+       AS '31-60',
+       Concat('$', IF(i.created_at >= Now() - interval 90 day
+                      AND i.created_at <= Now() - interval 60 day, Round((SELECT
+                   SUM(( ili.gross_amount + (
+                               ili.gross_amount * ili.sales_tax_rate *
+                   .01
+                   )
+                       ))
+                   FROM   invoice_line_items ili
+                   WHERE  ili.invoice_id = i.id
+                   AND ili.status = 'active'), 2) - Round(
+                   Ifnull((SELECT SUM(pti.amount_used)
+                   FROM   payment_to_invoice pti
+                   WHERE  pti.invoice_id = i.id
+                   AND pti.status = 'active'
+                   AND pti.created_at < Date_add(i.created_at, interval
+                   90 day
+                   )), 0), 2), 0.00))
+       AS '61-90',
+       Concat('$', IF(i.created_at <= Now() - interval 90 day, Round(
+                               (SELECT
+                                                                     SUM((
+                               ili.gross_amount + (
+                               ili.gross_amount * ili.sales_tax_rate * .01 )
+                                   ))
+                                                                      FROM
+                               invoice_line_items ili
+                                                                      WHERE
+                               ili.invoice_id = i.id
+                               AND
+                               ili.status = 'active'), 2) -
+                   Round(
+                                  Ifnull(
+                   (SELECT
+                   SUM(pti.amount_used)
+                                                             FROM
+                   payment_to_invoice pti
+                                                             WHERE
+                   pti.invoice_id = i.id
+                   AND pti.status = 'active'), 0),
+                                                            2), 0.00))
+       AS '90+',
+       Concat('$', Round(Ifnull((SELECT SUM(pti.amount_used)
+                                 FROM   payment_to_invoice pti
+                                 WHERE  pti.invoice_id = i.id
+                                        AND pti.status = 'active'), 0), 2))
+       AS
+       TotalAmountPaid,
+       Concat('$', Round((SELECT SUM(( ili.gross_amount + (
+                                       ili.gross_amount * ili.sales_tax_rate *
+                                                   .01 )
+                                                       ))
+                          FROM   invoice_line_items ili
+                          WHERE  ili.invoice_id = i.id
+                                 AND ili.status = 'active'), 2) - Round(
+                               Ifnull((SELECT SUM(pti.amount_used)
+                                       FROM   payment_to_invoice pti
+                                       WHERE  pti.invoice_id = i.id
+                                              AND pti.status = 'active'), 0), 2)
+       ) AS
+       TotalAmountDue,
+       Concat('$', Round((SELECT SUM((( ili.gross_amount * ili.sales_tax_rate *
+                                        .01 )))
+                          FROM   invoice_line_items ili
+                          WHERE  ili.invoice_id = i.id
+                                 AND ili.status = 'active'), 2))
+       AS InvoiceTaxTotal,
+       Concat('$', Round((SELECT SUM(( ili.gross_amount + (
+                                       ili.gross_amount * ili.sales_tax_rate *
+                                                   .01 )
+                                                       ))
+                          FROM   invoice_line_items ili
+                          WHERE  ili.invoice_id = i.id
+                                 AND ili.status = 'active'), 2))
+       AS InvoiceGrandTotal  FROM   invoices i
+       left join customers c
+              ON c.id = i.entity_id
+                 AND i.entity_type = 'customer'
+       left join lead_companies lc
+              ON lc.id = i.entity_id
+                 AND i.entity_type = 'lead_company'   WHERE i.type = 'invoice'
+AND
+i.status = 'active'
+AND
+(
+  ROUND(IFNULL(
+  (
+         SELECT SUM(pti.amount_used)
+         FROM   payment_to_invoice pti
+         WHERE  pti.invoice_id = i.id
+         AND    pti.status = 'active' ), 0),2) < ROUND(
+                                                        (
+                                                        SELECT SUM((ili.gross_amount + (ili.gross_amount * ili.sales_tax_rate * .01)))
+                                                        FROM   invoice_line_items ili
+                                                        WHERE  ili.invoice_id = i.id
+                                                        AND    ili.status = 'active' ),2)
+)   AND DATE_FORMAT(i.created_at, '%Y-%m-%d') >= '2018-09-01'  AND DATE_FORMAT(i.created_at, '%Y-%m-%d') <= '2018-09-30'
+;
+
+Optimized Query ( Took only 1 minute )
+=======================================================================================================================================
+SELECT i.invoice_recurring_id,c.id AS ID,
+       Concat(c.lname, ', ', c.fname) AS Customer,
+       i.id AS InvoiceID,
+       i.due_date AS InvoiceDueDate,
+       Concat('$', IF(( i.created_at + interval 30 day ) > Now(), Round(subq.totsum, 2) -Round(Ifnull(subq1.0_30_sum, 0 ), 2), 0.00)) AS '0-30',
+       Concat('$', IF(i.created_at > Now() - interval 60 day AND i.created_at <= Now() - interval 30 day, Round(subq.totsum, 2) - Round(Ifnull(subq1.31_60_sum, 0), 2), 0.00)) AS '31-60',
+       Concat('$', IF(i.created_at >= Now() - interval 90 day AND i.created_at <= Now() - interval 60 day, Round(subq.totsum, 2) - Round(Ifnull(subq1.61_90_sum, 0), 2), 0.00))  AS '61-90',
+       Concat('$', IF(i.created_at <= Now() - interval 90 day, Round(subq.totsum, 2) - Round(Ifnull(subq1.totsum1, 0),2), 0.00)) AS '90+',
+       Concat('$', Round(Ifnull(subq1.totsum1, 0), 2)) AS TotalAmountPaid,
+       Concat('$', Round(subq.totsum, 2) - Round(Ifnull(subq1.totsum1, 0), 2)) AS TotalAmountDue,
+       Concat('$', Round(subq.totsum3, 2)) AS InvoiceTaxTotal,
+       Concat('$', Round(subq.totsum, 2)) AS InvoiceGrandTotal
+
+FROM invoices i
+LEFT JOIN
+(SELECT ili.invoice_id as "invd",SUM(ili.gross_amount + (ili.gross_amount * ili.sales_tax_rate * .01)) as "totsum", SUM(ili.gross_amount * ili.sales_tax_rate * .01) as "totsum3"
+FROM   invoices i, invoice_line_items ili
+WHERE  ili.invoice_id = i.id
+AND    ili.status = 'active'
+group by ili.invoice_id
+) AS subq
+ON i.id = subq.invd
+
+LEFT JOIN
+(SELECT pti.invoice_id as "ptinvd",SUM(pti.amount_used) as "totsum1",SUM(case when pti.created_at <= Date_add(i.created_at,interval 30 day) then pti.amount_used end) AS "0_30_sum", SUM(case when pti.created_at <= Date_add(i.created_at,interval 60 day) then pti.amount_used end) AS "31_60_sum", SUM(case when pti.created_at < Date_add(i.created_at, interval 90 day) then pti.amount_used end) AS "61_90_sum"
+FROM   invoices i, payment_to_invoice pti
+WHERE  pti.invoice_id = i.id
+AND    pti.status = 'active'
+group by pti.invoice_id
+) AS subq1
+ON i.id = subq1.ptinvd
+
+
+left join customers c
+ON c.id = i.entity_id
+AND i.entity_type = 'customer'
+left join lead_companies lc
+ON lc.id = i.entity_id
+
+AND i.entity_type = 'lead_company'   WHERE i.type = 'invoice'
+AND i.status = 'active'
+AND ROUND(IFNULL(subq1.totsum1, 0),2) < ROUND(subq.totsum,2)
+AND DATE_FORMAT(i.created_at, '%Y-%m-%d') >= '2018-09-01'  AND DATE_FORMAT(i.created_at, '%Y-%m-%d') <= '2018-09-30'
+;
