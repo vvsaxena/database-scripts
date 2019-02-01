@@ -1,0 +1,57 @@
+Original query took ~11 seconds
+
+[root@na02lstxdbp06 query_tuning]# cat ./original_query.sql
+SELECT c.*
+FROM customers c
+LEFT JOIN tech_schedule ts ON c.install_appointment_id = ts.id
+LEFT JOIN users rep ON c.rep_id = rep.id
+LEFT JOIN user_hierarchy uhp_rep_id ON c.rep_id = uhp_rep_id.user_id AND uhp_rep_id.user_hierarchy_tree_id = 1
+LEFT JOIN user_hierarchy uhp_ts_user_id ON ts.user_id = uhp_ts_user_id.user_id AND uhp_ts_user_id.user_hierarchy_tree_id = 1
+WHERE c.sale_date > '0000-00-00'
+AND c.status='active'
+AND DATE_FORMAT(sale_date, '%Y-%m-%d') >= '2019-01-01'
+AND DATE_FORMAT(sale_date, '%Y-%m-%d') <= '2019-01-31'
+ORDER BY c.id DESC
+;
+Explain plan for original
+mysql> edit
+    -> ;
++----+-------------+----------------+--------+----------------------------------------------------------------------------------------------------------------+---------+---------+----------------------------------------+--------+-------------+
+| id | select_type | table          | type   | possible_keys                                                                                                  | key     | key_len | ref                                    | rows   | Extra       |
++----+-------------+----------------+--------+----------------------------------------------------------------------------------------------------------------+---------+---------+----------------------------------------+--------+-------------+
+|  1 | SIMPLE      | c              | ref    | status,sale_date,status_2,lead_type_id_11,status_train_id,status_location_id_sale_date,status_rep_id_sale_date | status  | 1       | const                                  | 946436 | Using where |
+|  1 | SIMPLE      | ce             | ref    | PRIMARY                                                                                                        | PRIMARY | 4       | altx_eversafe.c.install_appointment_id |      1 | Using where |
+|  1 | SIMPLE      | rep            | eq_ref | PRIMARY                                                                                                        | PRIMARY | 4       | altx_eversafe.c.rep_id                 |      1 | Using index |
+|  1 | SIMPLE      | uhp_rep_id     | eq_ref | PRIMARY                                                                                                        | PRIMARY | 8       | const,altx_eversafe.c.rep_id           |      1 | Using index |
+|  1 | SIMPLE      | uhp_ts_user_id | eq_ref | PRIMARY                                                                                                        | PRIMARY | 8       | const,altx_eversafe.ce.user_id         |      1 | Using index |
++----+-------------+----------------+--------+----------------------------------------------------------------------------------------------------------------+---------+---------+----------------------------------------+--------+-------------+
+5 rows in set (0.00 sec)
+
+Optimized query tool less than a second
+
+SELECT c.*
+FROM customers c
+LEFT JOIN tech_schedule ts ON c.install_appointment_id = ts.id
+LEFT JOIN users rep ON c.rep_id = rep.id
+LEFT JOIN user_hierarchy uhp_rep_id ON c.rep_id = uhp_rep_id.user_id AND uhp_rep_id.user_hierarchy_tree_id = 1
+LEFT JOIN user_hierarchy uhp_ts_user_id ON ts.user_id = uhp_ts_user_id.user_id AND uhp_ts_user_id.user_hierarchy_tree_id = 1
+WHERE sale_date between '2019-01-01'  and '2019-01-31'
+AND c.status='active'
+ORDER BY c.id DESC
+;
+
++----+-------------+----------------+--------+----------------------------------------------------------------------------------------------------------------+-----------+---------+----------------------------------------+-------+----------------------------------------------------+
+| id | select_type | table          | type   | possible_keys                                                                                                  | key       | key_len | ref                                    | rows  | Extra                                              |
++----+-------------+----------------+--------+----------------------------------------------------------------------------------------------------------------+-----------+---------+----------------------------------------+-------+----------------------------------------------------+
+|  1 | SIMPLE      | c              | range  | status,sale_date,status_2,lead_type_id_11,status_train_id,status_location_id_sale_date,status_rep_id_sale_date | sale_date | 3       | NULL                                   | 16056 | Using index condition; Using where; Using filesort |
+|  1 | SIMPLE      | ce             | ref    | PRIMARY                                                                                                        | PRIMARY   | 4       | altx_eversafe.c.install_appointment_id |     1 | Using where                                        |
+|  1 | SIMPLE      | rep            | eq_ref | PRIMARY                                                                                                        | PRIMARY   | 4       | altx_eversafe.c.rep_id                 |     1 | Using index                                        |
+|  1 | SIMPLE      | uhp_rep_id     | eq_ref | PRIMARY                                                                                                        | PRIMARY   | 8       | const,altx_eversafe.c.rep_id           |     1 | Using index                                        |
+|  1 | SIMPLE      | uhp_ts_user_id | eq_ref | PRIMARY                                                                                                        | PRIMARY   | 8       | const,altx_eversafe.ce.user_id         |     1 | Using index                                        |
++----+-------------+----------------+--------+----------------------------------------------------------------------------------------------------------------+-----------+---------+----------------------------------------+-------+----------------------------------------------------+
+
+Pay attention to reduced number of rows that makes the optimized query run faster
+
+the DATE_FORMAT function is not needed as the default date format is yyyy-mm-dd and any function on left hand side confuses optimizer
+also c.sale_date > '0000-00-00' is not needed since date range is already given.
+
