@@ -1,0 +1,149 @@
+installing kubernetes on 2 nodes ( master/slaves)
+
+on master
+
+1.install docker
+yum -y update 
+yum -y install docker
+systemctl enable docker
+systemctl start docker
+
+2.
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+
+3.setenforce 0
+
+4.vi /etc/selinux/config
+     SELINUX=permissive ##Change if it is enforceing
+
+5.
+yum -y install kubelet kubeadm kubectl
+systemctl start kubelet
+systemctl enable kubelet
+
+6.
+cat <<EOF >  /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+
+sysctl --system
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+7.
+kubeadm init --pod-network-cidr=10.244.0.0/16
+
+----Output-of above command-------
+kubeadm join 10.0.2.203:6443 --token 49ub6n.b97ie9hxthvfyjtx --discovery-token-ca-cert-hash sha256:09e35eb11e535c64171d50059a584ea209a8d2479d00de30c566f47dbc7128cf
+
+kubectl get nodes ( should show not ready yet )
+
+8.
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+9.
+kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/v0.9.1/Documentation/kube-flannel.yml
+
+10.
+kubectl apply -f https://git.io/weave-kube
+
+11.
+kubectl get nodes  ( should show READY )
+=========================================================================================================================
+On slave node repeat steps 1-6  and then issue the join command 
+kubeadm join 10.0.2.203:6443 --token 49ub6n.b97ie9hxthvfyjtx --discovery-token-ca-cert-hash sha256:09e35eb11e535c64171d50059a584ea209a8d2479d00de30c566f47dbc7128cf
+==========================================================================================================================
+To test the stateful mysql 
+
+1. create the Volume and Volumclaim manually 
+[root@vishalnew1 vsaxena]# cat pv-claim.yaml
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: task-pv-claim
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 3Gi
+
+[root@vishalnew1 vsaxena]# cat mysql-volumeclaim.yaml
+kind: PersistentVolume
+apiVersion: v1
+metadata:
+  name: task-pv-volume
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/data"
+
+kubernetes create -f pv-claim.yaml
+kubernetes create -f mysql-volumeclaim.yaml
+kubectl get pv task-pv-volume ( Should show the volume )
+kubectl get pvc(Should show claim , also create persistent data directory /mnt/data on all machines/hosts )
+
+2. Once persistent storage is setup then first create the secret root password in vault
+kubectl create secret generic mysql --from-literal=password=YOUR_PASSWORD
+
+3. create mysql deployment (mysql.yaml)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  labels:
+    app: mysql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - image: mysql:5.6
+          name: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql
+                  key: password
+          ports:
+            - containerPort: 3306
+              name: mysql
+          volumeMounts:
+            - name: task-pv-volume
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: task-pv-volume
+          persistentVolumeClaim:
+            claimName: task-pv-claim
+
+
+4.kubernetes create -f mysql.yaml
+
+5.Check docker running processes on slaves or configure services to connect to mysql
+
+
+
