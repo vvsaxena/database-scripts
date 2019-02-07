@@ -1,0 +1,28 @@
+Original Query ( Taking ~2.5 seconds , no data returned )
+
+SELECT * 
+FROM customer_equipment 
+WHERE install_tech_schedule_id=2082284 AND user_id =25282 
+AND id NOT IN (SELECT unique_id FROM payroll_to_customer_column_details WHERE table1 = 'customer_equipment' AND status = 'active') 
+AND status='active' ORDER BY id DESC;
+
+Optimized query # 1 ( taking ~1.5 seconds , no data returned)
+
+SELECT ce.*
+from customer_equipment ce 
+LEFT JOIN
+(SELECT unique_id FROM payroll_to_customer_column_details WHERE table1 = 'customer_equipment' AND status = 'active') AS pcd
+on ce.id = pcd.unique_id
+WHERE pcd.unique_id is NULL
+and ce.install_tech_schedule_id=2082284
+and ce.user_id =25282
+and ce.status='active'
+ORDER BY id DESC;
+
+Optimized Query #2 ( taking ~1.96 seconds , no data returned )
+SELECT * 
+FROM customer_equipment 
+WHERE install_tech_schedule_id=2082284 AND user_id =25282 
+AND id NOT IN (SELECT unique_id FROM payroll_to_customer_column_details WHERE status = 'active' and table1 = 'customer_equipment' ) 
+AND status='active' ORDER BY id DESC;
+
