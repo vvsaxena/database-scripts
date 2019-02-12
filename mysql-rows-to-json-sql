@@ -1,0 +1,15 @@
+Converting mysql table to json example
+SELECT CONCAT('[', better_result, ']') AS best_result FROM
+(
+SELECT GROUP_CONCAT('{', my_json, '}' SEPARATOR ',') AS better_result FROM
+(
+  SELECT
+    CONCAT
+    (
+      '"year":'   , '"', year   , '"', ','
+      '"quarter":', '"', quarter, '"', ','
+      '"total":'  , total
+    ) AS my_json
+  FROM mytable
+) AS more_json
+) AS yet_more_json
