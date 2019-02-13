@@ -1,0 +1,138 @@
+Installing kafka on 172.28.96.241
+
+yum install java-1.8.0-openjdk.x86_64 -y
+java -version
+vi /etc/profile
+add following
+export JAVA_HOME=/usr/lib/jvm/jre-1.8.0-openjdk
+export JRE_HOME=/usr/lib/jvm/jre
+source /etc/profile
+wget http://www-us.apache.org/dist/kafka/2.0.0/kafka_2.11-2.0.0.tgz
+tar xvf kafka_2.11-2.0.0.tgz
+mv kafka_2.11-2.0.0 /opt
+cd /opt/kafka_2.11-2.0.0
+bin/zookeeper-server-start.sh -daemon config/zookeeper.properties
+netstat -tlpn
+bin/kafka-server-start.sh config/server.properties &
+Adding a topic test
+bin/kafka-topics.sh –create –zookeeper localhost:2181 –replication-factor 1 –partitions 1 –topic test
+List the topics
+bin/kafka-topics.sh --list --zookeeper localhost:2181
+Watch the incomming messages in topic
+bin/kafka-console-consumer.sh --bootstrap-server 172.28.96.241:9092 --topic 172.28.97.159.vishal.test --from-beginning
+===================================================================================================
+Installing maxwell first
+wget https://github.com/zendesk/maxwell/releases/download/v1.18.0/maxwell-1.18.0.tar.gz
+gunzip maxwell-1.18.0.tar.gz
+tar xvf gunzip maxwell-1.18.0.tar
+cd maxwell-1.18.0/bin
+For viewing the mysql changes on standard output , assuming mysql is running on 172.28.97.159
+./maxwell --user='maxwell' --password='maxwell' --host='172.28.97.159' --producer=stdout
+Use javascript file to filter the regular insert/updates/deletes 
+ ./maxwell --user='maxwell' --password='maxwell123' --host=172.28.97.151 --producer=stdout --javascript testfile
+and here is the testfile
+------------------------------------------------
+function process_row(row) {
+                if ( row.type == "insert" ) {
+                                row.suppress();
+                        }
+                else if ( row.type == "update" ) {
+                        row.suppress();
+                } else if ( row.type == "delete" ) {
+                                row.suppress();
+                        }
+}
+---------------------------------------------------------
+
+
+Make sure server id is set in my.cnf
+to send the messages to kafka
+./maxwell --user='maxwell' --password='maxwell' --host='172.28.97.159' --producer=kafka --kafka.bootstrap.servers=172.28.96.241:9092 --kafka_topic=test
+===================================================================================================
+Now installing debezium on another machine vishalmysql2
+docker pull debezium/connect
+run debezium with kafka setup ( pay attention to --network host)
+docker run -it --network host --name connect -p 8083:8083 -e GROUP_ID=1 -e CONFIG_STORAGE_TOPIC=my-connect-configs -e OFFSET_STORAGE_TOPIC=my-connect-offsets -e ADVERTISED_HOST_NAME=vishalmysql2.dev.adcinternal.com -e BOOTSTRAP_SERVERS=172.28.96.241:9092 debezium/connect
+check if its running or not
+docker ps -a
+Now run the connector manually ( assuming that vishal is a database inside mysql server)
+curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" 172.17.0.1:8083/connectors/ -d '{ "name": "inventory-connector", "config": { "connector.class": "io.debezium.connector.mysql.MySqlConnector", "tasks.max": "1", "database.hostname": "172.28.97.159", "database.port": "3306", "database.user": "maxwell", "database.password": "maxwell", "database.server.id": "123", "database.server.name": "172.28.97.159", "database.whitelist": "vishal", "database.history.kafka.bootstrap.servers": "172.28.96.241:9092", "database.history.kafka.topic": "dbhistory.vishal" } }'
+
+If this fails with timezone issues as mentioned below
+
+{"error_code":400,"message":"Connector configuration is invalid and contains the following 1 error(s):\nUnable to connect: The server time zone value 'EDT' is unrecognized or represents more than one time zone. You must configure either the server or JDBC driver (via the serverTimezone configuration property) to use a more specifc time zone value if you want to utilize time zone support.\nYou can also find the above list of errors at the endpoint `/{connectorType}/config/validate`"}
+
+Ran following SQL in mysql to resolve this issue 
+SET GLOBAL time_zone = '+3:00';
+
+[root@vishalmysql2 vsaxena]# curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" 172.17.0.1:8083/connectors/ -d '{ "name": "inventory-connector", "config": { "connector.class": "io.debezium.connector.mysql.MySqlConnector", "tasks.max": "1", "database.hostname": "172.28.97.159", "database.port": "3306", "database.user": "maxwell", "database.password": "maxwell", "database.server.id": "123", "database.server.name": "172.28.97.159", "database.whitelist": "vishal", "database.history.kafka.bootstrap.servers": "172.28.96.241:9092", "database.history.kafka.topic": "dbhistory.vishal" } }'
+HTTP/1.1 201 Created
+Date: Thu, 20 Sep 2018 16:06:01 GMT
+Location: http://172.17.0.1:8083/connectors/inventory-connector
+Content-Type: application/json
+Content-Length: 497
+Server: Jetty(9.2.24.v20180105)
+
+{"name":"inventory-connector","config":{"connector.class":"io.debezium.connector.mysql.MySqlConnector","tasks.max":"1","database.hostname":"172.28.97.159","database.port":"3306","database.user":"maxwell","database.password":"maxwell","database.server.id":"123","database.server.name":"172.28.97.159","database.whitelist":"vishal","database.history.kafka.bootstrap.servers":"172.28.96.241:9092","database.history.kafka.topic":"dbhistory.vishal","name":"inventory-connector"},"tasks":[],"type":null}[root@vishalmysql2 vsaxena]#
+
+Now make some schema changes/inserts on mysql and on Kafka host see the changes in watcher
+
+For all changes specific to a table test in database vishal
+bin/kafka-console-consumer.sh --bootstrap-server 172.28.96.241:9092 --topic 172.28.97.159.vishal.test --from-beginning
+
+For all changes specific to Whole server 172.28.97.159 , show all schema changes and grants
+bin/kafka-console-consumer.sh --bootstrap-server 172.28.96.241:9092 --topic 172.28.97.159 --from-beginning
+
+For all only schema changes
+bin/kafka-console-consumer.sh --bootstrap-server 172.28.96.241:9092 --topic dbhistory.vishal --from-beginning
+============================================================================================================
+Installing elasticsearch/logstash and transferring mysql data to elasticsearch
+
+1.Install elasticsearch 
+    yum install elasticsearch
+    systemctl start elasticsearch
+    http://localhost:9200
+
+2.Download the logstash tar file ( don't install with yum )
+
+   wget https://artifacts.elastic.co/downloads/logstash/logstash-6.6.0.tar.gz
+   gunzip and untar it
+   create a simlink logstash to logstash-6.6.0
+
+3. download the mysql-connector for jdbc
+   mysql-connector-java-5.1.6.tar.gz  
+   unzip and untar it and set the correct path of jar file in logstash.conf ( next step)
+
+4.Prepare the logstash.conf file like this
+
+input {
+  jdbc {
+    jdbc_connection_string => "jdbc:mysql://localhost:3306/vishal1"
+    # The user we wish to execute our statement as
+    jdbc_user => "testuser"
+    jdbc_password => "test123@=yhgf"
+    # The path to our downloaded jdbc driver
+    jdbc_driver_library => "/home/local/CORP/vsaxena/mysql-connector-java-5.1.6/mysql-connector-java-5.1.6-bin.jar"
+    jdbc_driver_class => "com.mysql.jdbc.Driver"
+    # our query
+    statement => "SELECT * FROM adhoc_sql_requests"
+    }
+  }
+output {
+  stdout { codec => json_lines }
+  elasticsearch {
+  "hosts" => "localhost:9200"
+  "index" => "test-migrate"
+  "document_type" => "data"
+  }
+}
+
+5. Finally run the pipe line for data transfer from mysql to elasticsearch
+
+   logstash/bin/logstash -f logstash.conf
+
+6. Verify with 
+
+   curl -XPOST 'http://localhost:9200/test-migrate/_search?pretty=true' -d '{}'
+===============================================================================================================================
+
