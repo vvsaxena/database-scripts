@@ -135,4 +135,58 @@ output {
 
    curl -XPOST 'http://localhost:9200/test-migrate/_search?pretty=true' -d '{}'
 ===============================================================================================================================
+logstash.template file used by another script to generate logstash transfer from mysql to elasticsearch
+
+input {
+  jdbc {
+    jdbc_connection_string => "jdbc:mysql://localhost:3306/REPL_DB"
+    # The user we wish to execute our statement as
+    jdbc_user => "testuser"
+    jdbc_password => "test123@=yhgf"
+    # The path to our downloaded jdbc driver
+    jdbc_driver_library => "/home/local/CORP/vsaxena/mysql-connector-java-5.1.6/mysql-connector-java-5.1.6-bin.jar"
+    jdbc_driver_class => "com.mysql.jdbc.Driver"
+    # our query
+    statement => "SELECT REPL_QRY from REPL_TABLE"
+    }
+  }
+output {
+  stdout { codec => json_lines }
+  elasticsearch {
+  "hosts" => "localhost:9200"
+  "index" => "altx_alllocal"
+  "document_type" => "REPL_TYPE"
+  "document_id" => "%{docid}"
+  }
+}
+=====================================================================================================================================
+Script which used logstash.template file to start the transfer process , it uses primary keys to add as document_id in elasticsearch
+
+send_data.sh
+
+#!/bin/sh
+####
+## curl -XDELETE http://localhost:9200/altx_alllocal/invoice/AWjtltSYPfmU_9k6VmnL/?pretty
+## curl -XDELETE http://localhost:9200/<Index>/<Type>/<Document-id>/?pretty
+###
+dbList=$(mysql --login-path=root --skip-column-names -e"show databases like 'altx_%'")
+echo "$dbList"|while read DB
+do
+        tableList=$(mysql --login-path=root --skip-column-names -e"show tables" --database $DB)
+        echo "$tableList"|while read TBL
+        do
+                SQL="SELECT GROUP_CONCAT(COLUMN_NAME)
+FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+WHERE
+TABLE_SCHEMA = \"$DB\"
+AND CONSTRAINT_NAME='PRIMARY' and TABLE_NAME=\"$TBL\""
+                pkcols=$(echo "$SQL"|mysql --login-path=root  --skip-column-names --database $DB)
+                colList=$(mysql --login-path=root --skip-column-names -e"select group_concat(column_name) from information_schema.columns where table_name=\"$TBL\" and table_schema=\"$DB\"")
+                ESTYPE="${DB}_${TBL}"
+                sed "s/REPL_DB/$DB/;s/REPL_TABLE/$TBL/;s/REPL_TYPE/$ESTYPE/;s/REPL_QRY/\'$DB\' as \'database\',concat($pkcols) as docid,$colList/" logstash.template > logstash.conf
+                logstash/bin/logstash -f logstash.conf
+        done
+
+done
+=========================================================================================================================================
 
