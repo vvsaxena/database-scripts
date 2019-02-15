@@ -189,4 +189,100 @@ AND CONSTRAINT_NAME='PRIMARY' and TABLE_NAME=\"$TBL\""
 
 done
 =========================================================================================================================================
+To sync the ongoing changes for inserts/updates/deletes , start maxwell daemon to read binlog changes in mysql_changes file like this
 
+./maxwell --user='testuser'  --password='test123@=yhgf' --host=localhost --producer=file --output_file=mysql_changes --output_binlog_position
+
+and then use this script "update_data.sh" to sync changes to elasticsearch
+./update_data.sh mysql_changes
+
+Script is here
+
+#!/bin/sh
+###Functions starts here
+process_insert() {
+localItem=$4
+localDB=$1
+localtype=$2
+localtbl=$3
+SQL="SELECT GROUP_CONCAT(COLUMN_NAME)
+FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+WHERE
+TABLE_SCHEMA = \"$localDB\"
+AND CONSTRAINT_NAME='PRIMARY' and TABLE_NAME=\"$localtbl\""
+pkcols=$(echo "$SQL"|mysql --login-path=root  --skip-column-names --database $DB)
+ESTYPE="${localDB}_${localtbl}"
+pkcount=$(echo "$pkcols"|tr ',' '\n'|wc -l|awk '{print $1}')
+colList=$(mysql --login-path=root --skip-column-names -e"select group_concat(column_name) from information_schema.columns where table_name=\"$localtbl\" and table_schema=\"$localDB\"")
+WHERE_COND=""
+start=1
+for colname in `echo "$pkcols"|tr ',' ' '`
+do
+        cmnd=$(echo "echo \"\$localItem\"|jq '.data|.$colname'")
+        dataItem=$(eval "$cmnd"|sed "s/\"/'/g")
+        if [ $start -eq 1 ]
+        then
+                WHERE_COND=$WHERE_COND`echo -e " WHERE $colname = $dataItem"`
+        else
+                WHERE_COND=$WHERE_COND`echo -e " AND $colname = $dataItem"`
+        fi
+        start=`expr $start + 1`
+done
+
+sed "s/REPL_DB/$localDB/;s/REPL_TABLE/$localtbl/;s/REPL_TYPE/$ESTYPE/;s/REPL_WHERE/$WHERE_COND/;s/REPL_QRY/\'$localDB\' as \'database\',concat($pkcols) as docid,$colList/" logstash.template.update > logstash.conf
+
+../../logstash/bin/logstash -f logstash.conf
+
+}
+
+process_delete() {
+localItem=$4
+localDB=$1
+localtype=$2
+localtbl=$3
+ESTYPE="${localDB}_${localtbl}"
+SQL="SELECT GROUP_CONCAT(COLUMN_NAME)
+FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+WHERE
+TABLE_SCHEMA = \"$localDB\"
+AND CONSTRAINT_NAME='PRIMARY' and TABLE_NAME=\"$localtbl\""
+pkcols=$(echo "$SQL"|mysql --login-path=root  --skip-column-names --database $DB)
+PAT=""
+for colname in `echo "$pkcols"|tr ',' ' '`
+do
+        cmnd=$(echo "echo \"\$localItem\"|jq '.data|.$colname'")
+        dataItem=$(eval "$cmnd"|sed "s/\"/'/g")
+        PAT=$PAT`echo -e "$dataItem"`
+done
+eval "curl -XDELETE http://localhost:9200/altx_alllocal/$ESTYPE/$PAT"
+}
+
+####Main Starts here
+changeFile=$1
+###extract for which database , table and type of event occured
+cat $changeFile|while read line
+do
+        DB=$(echo "$line"|jq -r '.database')
+        evntype=$(echo "$line"|jq -r '.type')
+        tbl=$(echo "$line"|jq -r '.table')
+
+        if [ $evntype = "insert" ]
+        then
+                echo "Processing insert"
+                process_insert "$DB" "$evntype" "$tbl" "$line"
+        fi
+
+        if [ $evntype = "update" ]
+        then
+                echo "Processing update"
+                process_insert "$DB" "$evntype" "$tbl" "$line"
+
+        fi
+
+        if [ $evntype = "delete" ]
+        then
+                echo "Processing delete"
+                process_delete "$DB" "$evntype" "$tbl" "$line"
+        fi
+done
+===============================================================================================================================
