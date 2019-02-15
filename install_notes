@@ -200,6 +200,38 @@ Script is here
 
 #!/bin/sh
 ###Functions starts here
+process_insert_thru_curl() {
+localItem=$4
+localDB=$1
+localtype=$2
+localtbl=$3
+SQL="SELECT GROUP_CONCAT(COLUMN_NAME)
+FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+WHERE
+TABLE_SCHEMA = \"$localDB\"
+AND CONSTRAINT_NAME='PRIMARY' and TABLE_NAME=\"$localtbl\""
+pkcols=$(echo "$SQL"|mysql --login-path=root  --skip-column-names --database $DB)
+ESTYPE="${localDB}_${localtbl}"
+PAT=""
+for colname in `echo "$pkcols"|tr ',' ' '`
+do
+        cmnd=$(echo "echo \"\$localItem\"|jq -r '.data|.$colname'")
+        dataItem=$(eval "$cmnd"|sed "s/\"/'/g")
+        PAT=$PAT`echo -e "$dataItem"`
+done
+DATA=$(echo "$localItem"|jq '.data'|egrep -v "^{|^}")
+DATA=$DATA`echo -e "\n  ,\"database\": \"$localDB\","`
+DATA=$DATA`echo -e "\n  \"docid\": \"$PAT\""`
+
+ESCOMMAND="curl -X PUT \"http://localhost:9200/altx_alllocal/$ESTYPE/$PAT?pretty\" -H 'Content-Type: application/json' -d'
+{
+$DATA
+}' "
+
+eval "$ESCOMMAND"
+
+}
+
 process_insert() {
 localItem=$4
 localDB=$1
@@ -269,13 +301,15 @@ do
         if [ $evntype = "insert" ]
         then
                 echo "Processing insert"
-                process_insert "$DB" "$evntype" "$tbl" "$line"
+                ### Use process_insert function if you want logstash to do the sync
+                process_insert_thru_curl "$DB" "$evntype" "$tbl" "$line"
         fi
 
         if [ $evntype = "update" ]
         then
                 echo "Processing update"
-                process_insert "$DB" "$evntype" "$tbl" "$line"
+                ### Use process_insert function if you want logstash to do the sync
+                process_insert_thru_curl "$DB" "$evntype" "$tbl" "$line"
 
         fi
 
@@ -285,4 +319,5 @@ do
                 process_delete "$DB" "$evntype" "$tbl" "$line"
         fi
 done
+
 ===============================================================================================================================
