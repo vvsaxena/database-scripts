@@ -110,6 +110,11 @@ diff /tmp/schemaBeforeConversion.sql /tmp/schemaAfterConversion.sql
 schema_diff_code=$?
 echo "$DB.$TAB.$typ.command-status:$convert_ext_code.schema-diff:$schema_diff_code"
 
+else
+##### If columns does not need to be converted then do only tables
+tblChangeSql="engine=innodb, row_format=dynamic, CHARACTER SET $charSet COLLATE $collate"
+eval "pt-online-schema-change --alter \"$tblChangeSql\" 'D=$DB,t=$TAB' --user \$user --host \$HST --password \$pass --statistics --progress percentage,5 --print --alter-foreign-keys-method auto --null-to-not-null --recursion-method=none --nocheck-unique-key-change --execute"
+
 fi
 
 }
