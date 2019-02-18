@@ -1,0 +1,125 @@
+#### This is the main script to change the character set to utf8mb4 for whole database and individual tables/columns
+#!/bin/sh
+DB=$1
+export user=XXXXXXXX
+export pass=XXXXXXX
+export charSet=utf8mb4
+export collate=utf8mb4_unicode_ci
+export HST=172.20.0.199
+workdir=/st_mysql_na02nfs_t01/db/utf8-tests/conv-db-utf8/
+outdir=${workdir}/logs
+
+mkdir -p $workdir $outdir
+
+> $outdir/$DB/table-change.log
+> $outdir/$DB/column-change.log
+> $outdir/$DB/db-change.log
+
+##### Running the DB change
+mkdir -p $outdir/$DB
+$workdir/db_change.sh $DB >> $outdir/$DB/db-change.log 2>&1
+
+######Running table changes 
+### This PArt is commented because col_change_new.sh is handling the table level changes
+
+#tableList=$(mysql -u$user -p$pass -h $HST --skip-column-names --database $DB -e "show tables"|grep -v "^$"|sort)
+#for tbl in `echo "$tableList"`
+#do
+#        $workdir/table_change.sh $DB "$tbl" >> $outdir/$DB/table-change.log 2>&1
+#done
+##############################################################
+## Running Column changes
+$workdir/col_change_new.sh $DB >> $outdir/$DB/column-change.log 2>&1
+
+
+
+
+#### THis is the col_change_new.sh script which is called in above script
+#!/bin/sh
+
+generate_char_alters() {
+DB=$1
+TAB=$2
+typ='char-alters'
+outstr=$(mysql -u$user -p$pass -h $HST --skip-column-names<<BOTTOM|grep -v "^$"|sed 's/\t/|/g'
+use information_schema;
+SELECT 'SUCCESS',column_name,data_type,column_type,IS_NULLABLE,COLUMN_DEFAULT
+FROM COLUMNS where table_schema like "$DB" and table_name="$TAB" and data_type in ('varchar','char','text','tinytext','mediumtext','longtext','enum')
+BOTTOM
+)
+
+if echo "$outstr"|grep 'SUCCESS' > /dev/null
+then
+alterSql=$(echo "$outstr"|while IFS="|" read HDR col coldesc coltyp nullType defaultType
+do
+        nullDefault=""
+        if echo "$nullType" | grep "NO" > /dev/null
+        then
+                nullDefault=" NOT NULL "
+        fi
+
+        defaultStr=""
+        if echo "$defaultType"|grep "NULL" > /dev/null
+        then
+                :
+        else
+                defaultStr=" DEFAULT '$defaultType' "
+        fi
+
+#       echo "$col : $coldesc : $coltyp"
+
+        if echo $coldesc |grep "char" > /dev/null
+        then
+                echo "CHANGE \\\`$col\\\` \\\`$col\\\` $coltyp CHARACTER SET $charSet COLLATE $collate $nullDefault $defaultStr"
+        fi
+
+        if echo "$coldesc" | grep text > /dev/null
+        then
+                echo "CHANGE \\\`$col\\\` \\\`$col\\\` $coldesc CHARACTER SET $charSet COLLATE $collate $nullDefault $defaultStr"
+        fi
+
+        if echo $coldesc |grep  "enum"  > /dev/null
+        then
+                echo "CHANGE \\\`$col\\\` \\\`$col\\\` $coltyp CHARACTER SET $charSet COLLATE $collate $nullDefault $defaultStr"
+        fi
+
+done|tr '\'n ','|sed "s/,$//g"
+)
+
+tblChangeSql="engine=innodb, row_format=dynamic, CHARACTER SET $charSet COLLATE $collate"
+###Fetching before image of table schema
+mysql -u$user -p$pass -h $HST <<BOTTOM|grep -v "^$" > /tmp/schemaBeforeConversion.sql
+use $DB;
+desc $TAB;
+BOTTOM
+
+###Starting the conversion
+#echo "pt-online-schema-change --alter \"$alterSql,$tblChangeSql\" 'D=$DB,t=$TAB' --user \$user --host localhost --password \$pass --statistics --progress percentage,5 --print --alter-foreign-keys-method auto --null-to-not-null --recursion-method=none --nocheck-unique-key-change --execute"
+eval "pt-online-schema-change --alter \"$alterSql,$tblChangeSql\" 'D=$DB,t=$TAB' --user \$user --host \$HST --password \$pass --statistics --progress percentage,5 --print --alter-foreign-keys-method auto --null-to-not-null --recursion-method=none --nocheck-unique-key-change --execute"
+
+convert_ext_code=$?
+
+###Fetching after image of table schema
+mysql -u$user -p$pass -h $HST <<BOTTOM|grep -v "^$" > /tmp/schemaAfterConversion.sql
+use $DB;
+desc $TAB;
+BOTTOM
+
+diff /tmp/schemaBeforeConversion.sql /tmp/schemaAfterConversion.sql
+
+schema_diff_code=$?
+echo "$DB.$TAB.$typ.command-status:$convert_ext_code.schema-diff:$schema_diff_code"
+
+fi
+
+}
+
+#### Main Starts here
+DB=$1
+tableList=$(mysql -u$user -p$pass -h $HST --skip-column-names --database $DB -e "show tables"|grep -v "^$"|sort)
+for tbl in `echo "$tableList"`
+do
+        echo "In Coumn Change process $DB.$tbl"
+        generate_char_alters $DB "$tbl"
+done
+##############################################################
