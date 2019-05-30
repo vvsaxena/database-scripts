@@ -1,0 +1,29 @@
+We keep seeing deadlocks like this , they became frequent when we added multi -DC nodes
+
+LATEST DETECTED DEADLOCK
+------------------------
+2019-04-10 15:27:45 7ed9809d8700
+*** (1) TRANSACTION:
+TRANSACTION 45204629428, ACTIVE 26 sec updating or deleting
+mysql tables in use 1, locked 1
+LOCK WAIT 4 lock struct(s), heap size 1184, 3 row lock(s), undo log entries 1
+MySQL thread id 11680221, OS thread handle 0x7ed9803a8700, query id 460112812 172.20.0.220 securitytrax update
+INSERT INTO sessions (session_id, company_id, user_id, login_id, data, last_activity, created_at) VALUES ('nfvfmk3vugdjs3e4bkd11en0s1', '171', '', '', 'mobile|C:11:\"ArrayObject\":21:{x:i:0;a:0:{};m:a:0:{}}', '1554924439', '1554924439') ON DUPLICATE KEY UPDATE data = 'mobile|C:11:\"ArrayObject\":21:{x:i:0;a:0:{};m:a:0:{}}', last_activity = '1554924439', user_id = '', company_id = '171', login_id = ''
+*** (1) WAITING FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 392787 page no 428 n bits 432 index `company_id` of table `altx_global`.`sessions` trx id 45204629428 lock_mode X locks rec but not gap waiting
+*** (2) TRANSACTION:
+TRANSACTION 45204628929, ACTIVE 33 sec fetching rows
+mysql tables in use 1, locked 1
+25 lock struct(s), heap size 2936, 46 row lock(s)
+MySQL thread id 11680182, OS thread handle 0x7ed9809d8700, query id 460112237 172.20.0.220 securitytrax updating
+DELETE FROM sessions WHERE last_activity < '1554910032' AND company_id = '171'
+*** (2) HOLDS THE LOCK(S):
+RECORD LOCKS space id 392787 page no 428 n bits 432 index `company_id` of table `altx_global`.`sessions` trx id 45204628929 lock_mode X
+*** (2) WAITING FOR THIS LOCK TO BE GRANTED:
+RECORD LOCKS space id 392787 page no 428 n bits 432 index `company_id` of table `altx_global`.`sessions` trx id 45204628929 lock_mode X waiting
+*** WE ROLL BACK TRANSACTION (1)
+
+The solution was to add index on (company_id,last_activity) in sessions table. No of scanned rows reduced dramatically and all requests  which 
+were taking longer now finished within 1 second. This improved "DELETE" operation and therefor helped the lock to be free in less amount of time.
+
+No More deadlock
