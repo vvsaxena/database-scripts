@@ -1,0 +1,21 @@
+Origial Query Was running 5+ hours in biggest client database eversafe
+SELECT DISTINCT cn.*
+                FROM customer_notes cn
+                LEFT JOIN customers c
+                    ON c.id = cn.customer_id
+                LEFT JOIN tech_schedule ts_install
+                    on c.install_appointment_id = ts_install.id
+                LEFT JOIN tech_schedule ts
+                    ON cn.tech_schedule_id = ts.id
+                LEFT JOIN calendar_events ce
+                    ON cn.id = ce.customer_note_id
+                LEFT JOIN customer_communications cc
+                    ON cc.customer_note_id = cn.id
+                WHERE cn.id > 0
+                     AND cn.user_id IN ('2481')
+                ORDER BY cn.id DESC
+
+Explain found that table "ce" ( calendar_events ) does not use index and show lots of rows scanned . So built index on
+customer_note_id column on calendar_events table and same query was finished in 7 seconds. Huge gain.
+
+alter table calendar_events add index idx_notes (customer_note_id);
