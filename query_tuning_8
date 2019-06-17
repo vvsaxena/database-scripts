@@ -1,0 +1,72 @@
+Original Query ( taking 1+ hour)
+=========================================================================================================================================
+SELECT c.id AS ID, DATE_FORMAT(c.sale_date, '%m/%d/%Y') as SaleDate,
+DATE_FORMAT(FROM_UNIXTIME(ts.start_time), '%m/%d/%Y') AS InstallDate,
+CONCAT(c.fname,' ',c.lname) AS Customer,
+c.account_num AS AccountNum,
+c.phone1 as Phone,
+c.city AS City,
+c.state AS State,
+c.zip AS Zip,
+CASE u.id  WHEN  '0' THEN '' ELSE  CONCAT(u.fname,' ',u.lname) END as SalesRep,
+CASE tech.id  WHEN  '0' THEN '' ELSE  CONCAT(tech.fname,' ',tech.lname) END as Technician,
+loc.name AS OfficeLocation, c.is_installed as Installed, mmrs.amount AS MMR,
+lc.name AS PartnerCompany, c.customer_is_cancelled AS CancelStatus,
+CASE c.customer_cancel_date WHEN '0000-00-00' THEN '' ELSE DATE_FORMAT(c.customer_cancel_date, '%m/%d/%Y') END AS CancelDate,
+CASE c.fund_funded_date WHEN '0000-00-00' THEN '' ELSE DATE_FORMAT(c.fund_funded_date, '%m/%d/%Y') END AS FundedDate,
+customer_cancel_reasons.name AS CancellationReason,
+CASE (SELECT COUNT(*) FROM object_tags WHERE tag_id = 2 AND object_id = c.id AND status = 'active') WHEN '0' THEN 'false' ELSE 'true' END AS HasTagHold,
+CASE (SELECT COUNT(*) FROM object_tags WHERE tag_id = 3 AND object_id = c.id AND status = 'active') WHEN '0' THEN 'false' ELSE 'true' END AS HasTagNoPhonesNoPower,
+IF((c.latitude !=0 AND c.latitude IS NOT NULL AND c.longitude != 0 AND c.longitude IS NOT NULL), "true", "false") AS IsGeocoded,
+IF((SELECT COUNT(*) FROM customer_to_email WHERE customer_id = c.id AND email_id =6) > 0, "true", "false") AS ReceivedWelcomeToADTEmail
+FROM customers c
+LEFT JOIN users u ON c.rep_id = u.id
+LEFT JOIN tech_schedule ts ON ts.id = c.install_appointment_id
+LEFT JOIN users tech ON ts.user_id = tech.id
+LEFT JOIN mmrs ON c.mmr_id = mmrs.id
+LEFT JOIN lead_companies lc ON c.lead_company_id = lc.id
+LEFT JOIN customer_cancel_reasons ON customer_cancel_reasons.id = c.customer_cancel_reason_id
+LEFT JOIN locations loc ON c.location_id = loc.id
+WHERE c.sale_date <> '0000-00-00'  AND c.status='active'
+AND ts.start_time >= 1514790000 AND ts.start_time <= 1559368799
+AND c.lead_company_id IN ('3187','3183')
+ORDER BY c.id DESC
+;
+==========================================================================================================================================
+New optimized query using derived table "DRV"
+==========================================================================================================================================
+SELECT c.id AS ID, DATE_FORMAT(c.sale_date, '%m/%d/%Y') as SaleDate,
+DATE_FORMAT(FROM_UNIXTIME(ts.start_time), '%m/%d/%Y') AS InstallDate,
+CONCAT(c.fname,' ',c.lname) AS Customer,
+c.account_num AS AccountNum,
+c.phone1 as Phone,
+c.city AS City,
+c.state AS State,
+c.zip AS Zip,
+CASE u.id  WHEN  '0' THEN '' ELSE  CONCAT(u.fname,' ',u.lname) END as SalesRep,
+CASE tech.id  WHEN  '0' THEN '' ELSE  CONCAT(tech.fname,' ',tech.lname) END as Technician,
+loc.name AS OfficeLocation, c.is_installed as Installed, mmrs.amount AS MMR,
+lc.name AS PartnerCompany, c.customer_is_cancelled AS CancelStatus,
+CASE c.customer_cancel_date WHEN '0000-00-00' THEN '' ELSE DATE_FORMAT(c.customer_cancel_date, '%m/%d/%Y') END AS CancelDate,
+CASE c.fund_funded_date WHEN '0000-00-00' THEN '' ELSE DATE_FORMAT(c.fund_funded_date, '%m/%d/%Y') END AS FundedDate,
+customer_cancel_reasons.name AS CancellationReason,
+CASE (SELECT COUNT(*) FROM object_tags WHERE tag_id = 2 AND object_id = c.id AND status = 'active') WHEN '0' THEN 'false' ELSE 'true' END AS HasTagHold,
+CASE (SELECT COUNT(*) FROM object_tags WHERE tag_id = 3 AND object_id = c.id AND status = 'active') WHEN '0' THEN 'false' ELSE 'true' END AS HasTagNoPhonesNoPower,
+IF((c.latitude !=0 AND c.latitude IS NOT NULL AND c.longitude != 0 AND c.longitude IS NOT NULL), "true", "false") AS IsGeocoded,
+IF(DRV.CNT > 0, "true", "false") AS ReceivedWelcomeToADTEmail
+FROM customers c
+LEFT JOIN
+( select customer_id as CID, count(*) as CNT from customer_to_email where email_id=6 group by customer_id ) AS DRV ON c.id = DRV.CID
+LEFT JOIN users u ON c.rep_id = u.id
+LEFT JOIN tech_schedule ts ON ts.id = c.install_appointment_id
+LEFT JOIN users tech ON ts.user_id = tech.id
+LEFT JOIN mmrs ON c.mmr_id = mmrs.id
+LEFT JOIN lead_companies lc ON c.lead_company_id = lc.id
+LEFT JOIN customer_cancel_reasons ON customer_cancel_reasons.id = c.customer_cancel_reason_id
+LEFT JOIN locations loc ON c.location_id = loc.id
+WHERE c.sale_date <> '0000-00-00'  AND c.status='active'
+AND ts.start_time >= 1514790000 AND ts.start_time <= 1559368799
+AND c.lead_company_id IN ('3187','3183')
+ORDER BY c.id DESC
+;
+======================================================================================================================================
