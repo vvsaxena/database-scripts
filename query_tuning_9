@@ -1,0 +1,270 @@
+Original query without "OR" grouping taking 5+ minutes
+=========================================================================================================================================
+SELECT
+c.id AS TraxId,
+CONCAT(c.fname,' ',c.lname) AS Customer,
+DATE_FORMAT(c.sale_date, "%m/%d/%Y") AS CustomerSaleDate,
+loc.name AS OfficeLocation,
+DATE_FORMAT(c.customer_cancel_date, '%m/%d/%Y') as CancelDate,
+mmrs.amount AS MMR,
+c.rebate_check AS RebateAmount,
+CONCAT(t.months,' ','MONTHS') AS ContractTerm,
+
+CONCAT(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), ''),' ','MONTHS') AS MonthsRemaining,
+
+ifnull(DRV.mx_created_by,'No Record') AS CanceledById,
+
+ccr.name AS CancellationReason,
+
+Concat('$', Round(ifnull((SELECT SUM(ili.total_amount)
+FROM invoice_line_items ili
+WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalInvoiceAmounts,
+
+Concat('$', Round(ifnull((SELECT SUM(pti.amount_used)
+FROM payment_to_invoice pti
+WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalPaymentToInvoiceAmounts,
+
+Concat('$', Round((mmrs.amount*(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), '0'))),2)) AS BOC,
+
+Concat('$', Round((SELECT SUM(ili.total_amount)FROM invoice_line_items ili WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')), 2) - Round(ifnull((SELECT SUM(pti.amount_used)FROM payment_to_invoice pti WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalInvoiceAmountDue,
+
+
+Concat('$', Round((mmrs.amount*(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), '0'))),2) +
+
+
+
+Round(ifnull((SELECT SUM(ili.total_amount)FROM invoice_line_items ili WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)
+- Round(ifnull((SELECT SUM(pti.amount_used)FROM payment_to_invoice pti WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalDue
+
+
+FROM customers c
+
+LEFT JOIN
+(
+SELECT key1 as CID,MAX(created_by) as mx_created_by FROM log
+WHERE table1 = 'customers'
+AND (action LIKE '%Customer Is Cancelled changed from <em>null</em> to true.%'
+OR action LIKE '%Customer Is Cancelled changed from false to true.%')
+group by key1
+) as DRV on DRV.CID = c.id
+
+LEFT JOIN customer_cancel_reasons ccr ON ccr.id = c.customer_cancel_reason_id
+LEFT JOIN mmrs ON c.mmr_id = mmrs.id
+LEFT JOIN locations loc ON c.location_id = loc.id
+LEFT JOIN terms t ON t.id = c.term_id
+LEFT JOIN invoices i ON i.entity_id = c.id AND i.entity_type = 'customer' AND i.status != 'recurring'
+LEFT JOIN invoice_line_items ili ON ili.invoice_id = i.id
+  WHERE c.status = 'active'   AND DATE_FORMAT(c.customer_cancel_date, '%Y-%m-%d') >= '2019-06-01'   AND DATE_FORMAT(c.customer_cancel_date, '%Y-%m-%d') <= '2019-06-18'    GROUP BY c.id  ORDER BY c.id DESC
+;
+[root@na01lstxdbp01 query_tuning]# cat orig_query_06192019.sql
+SELECT
+c.id AS TraxId,
+CONCAT(c.fname,' ',c.lname) AS Customer,
+DATE_FORMAT(c.sale_date, "%m/%d/%Y") AS CustomerSaleDate,
+loc.name AS OfficeLocation,
+DATE_FORMAT(c.customer_cancel_date, '%m/%d/%Y') as CancelDate,
+mmrs.amount AS MMR,
+c.rebate_check AS RebateAmount,
+CONCAT(t.months,' ','MONTHS') AS ContractTerm,
+
+CONCAT(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), ''),' ','MONTHS') AS MonthsRemaining,
+
+ifnull((SELECT MAX(l.created_by) FROM log l WHERE l.table1 = 'customers' AND l.key1 = c.id AND l.action LIKE '%Customer Is Cancelled changed from <em>null</em> to true.%' OR l.action LIKE '%Customer Is Cancelled changed from false to true.%' ),'No Record') AS CanceledById,
+
+ccr.name AS CancellationReason,
+
+Concat('$', Round(ifnull((SELECT SUM(ili.total_amount)
+FROM invoice_line_items ili
+WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalInvoiceAmounts,
+
+Concat('$', Round(ifnull((SELECT SUM(pti.amount_used)
+FROM payment_to_invoice pti
+WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalPaymentToInvoiceAmounts,
+
+Concat('$', Round((mmrs.amount*(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), '0'))),2)) AS BOC,
+
+Concat('$', Round((SELECT SUM(ili.total_amount)FROM invoice_line_items ili WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')), 2) - Round(ifnull((SELECT SUM(pti.amount_used)FROM payment_to_invoice pti WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalInvoiceAmountDue,
+
+
+Concat('$', Round((mmrs.amount*(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), '0'))),2) +
+
+
+
+Round(ifnull((SELECT SUM(ili.total_amount)FROM invoice_line_items ili WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)
+- Round(ifnull((SELECT SUM(pti.amount_used)FROM payment_to_invoice pti WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalDue
+
+
+FROM customers c
+LEFT JOIN customer_cancel_reasons ccr ON ccr.id = c.customer_cancel_reason_id
+LEFT JOIN mmrs ON c.mmr_id = mmrs.id
+LEFT JOIN locations loc ON c.location_id = loc.id
+LEFT JOIN terms t ON t.id = c.term_id
+LEFT JOIN invoices i ON i.entity_id = c.id AND i.entity_type = 'customer' AND i.status != 'recurring'
+LEFT JOIN invoice_line_items ili ON ili.invoice_id = i.id
+  WHERE c.status = 'active'   AND DATE_FORMAT(c.customer_cancel_date, '%Y-%m-%d') >= '2019-06-01'   AND DATE_FORMAT(c.customer_cancel_date, '%Y-%m-%d') <= '2019-06-18'    GROUP BY c.id  ORDER BY c.id DESC
+;
+
+explain plan for this
+
++----+--------------------+-------+--------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------+---------+--------------------------------+--------+---------------------------------------------------------------------+
+| id | select_type        | table | type   | possible_keys                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | key                   | key_len | ref                            | rows   | Extra                                                               |
++----+--------------------+-------+--------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------+---------+--------------------------------+--------+---------------------------------------------------------------------+
+|  1 | PRIMARY            | c     | ref    | PRIMARY,status,sale_date,rep_id,is_installed,location_id,lead_type_id,lead_rep_id,lead_type_id_3,account_num,lname,account_type,lead_company_id,lead_type_id_2,lead_requested_count,lead_last_requested,status_2,adt_customer_number,adt_serial_man_status,analytics_type_analytics_id,created,lead_type_id_11,lead_queue_3,status_train_id,status_location_id_sale_date,phone1,phone2,phone3,phone4,install_appointment_id,location_id_rep_id_train_id,status_rep_id_sale_date | status                | 1       | const                          |  15131 | Using index condition; Using where; Using temporary; Using filesort |
+|  1 | PRIMARY            | ccr   | ALL    | PRIMARY                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | NULL                  | NULL    | NULL                           |      5 | Using where; Using join buffer (Block Nested Loop)                  |
+|  1 | PRIMARY            | mmrs  | eq_ref | PRIMARY                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | PRIMARY               | 4       | altx_selectsmart.c.mmr_id      |      1 | NULL                                                                |
+|  1 | PRIMARY            | loc   | eq_ref | PRIMARY                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | PRIMARY               | 4       | altx_selectsmart.c.location_id |      1 | NULL                                                                |
+|  1 | PRIMARY            | t     | eq_ref | PRIMARY                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | PRIMARY               | 4       | altx_selectsmart.c.term_id     |      1 | NULL                                                                |
+|  1 | PRIMARY            | i     | ref    | entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                           | entity_type_entity_id | 5       | const,altx_selectsmart.c.id    |      2 | Using where                                                         |
+|  1 | PRIMARY            | ili   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |      1 | Using index                                                         |
+| 13 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |      2 | Using index condition; Using where                                  |
+| 13 | DEPENDENT SUBQUERY | pti   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |      1 | Using where                                                         |
+| 11 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |      2 | Using index condition; Using where                                  |
+| 11 | DEPENDENT SUBQUERY | ili   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |      1 | Using where                                                         |
+|  9 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |      2 | Using index condition; Using where                                  |
+|  9 | DEPENDENT SUBQUERY | pti   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |      1 | Using where                                                         |
+|  7 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |      2 | Using index condition; Using where                                  |
+|  7 | DEPENDENT SUBQUERY | ili   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |      1 | Using where                                                         |
+|  5 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |      2 | Using index condition; Using where                                  |
+|  5 | DEPENDENT SUBQUERY | pti   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |      1 | Using where                                                         |
+|  3 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |      2 | Using index condition; Using where                                  |
+|  3 | DEPENDENT SUBQUERY | ili   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |      1 | Using where                                                         |
+|  2 | DEPENDENT SUBQUERY | l     | ALL    | table1,key1,table1_2,table1_3                                                                                                                                                                                                                                                                                                                                                                                                                                                   | NULL                  | NULL    | NULL                           | 821490 | Using where                                                         |
++----+--------------------+-------+--------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------+---------+--------------------------------+--------+---------------------------------------------------------------------+
+20 rows in set (0.01 sec)
+
+=======================================================================================================================================
+Optimized query , by just grouping the "OR" condition using paranthesis , query time reduced to 0.02 seconds
+
+SELECT
+c.id AS TraxId,
+CONCAT(c.fname,' ',c.lname) AS Customer,
+DATE_FORMAT(c.sale_date, "%m/%d/%Y") AS CustomerSaleDate,
+loc.name AS OfficeLocation,
+DATE_FORMAT(c.customer_cancel_date, '%m/%d/%Y') as CancelDate,
+mmrs.amount AS MMR,
+c.rebate_check AS RebateAmount,
+CONCAT(t.months,' ','MONTHS') AS ContractTerm,
+
+CONCAT(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), ''),' ','MONTHS') AS MonthsRemaining,
+
+ifnull(DRV.mx_created_by,'No Record') AS CanceledById,
+
+ccr.name AS CancellationReason,
+
+Concat('$', Round(ifnull((SELECT SUM(ili.total_amount)
+FROM invoice_line_items ili
+WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalInvoiceAmounts,
+
+Concat('$', Round(ifnull((SELECT SUM(pti.amount_used)
+FROM payment_to_invoice pti
+WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalPaymentToInvoiceAmounts,
+
+Concat('$', Round((mmrs.amount*(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), '0'))),2)) AS BOC,
+
+Concat('$', Round((SELECT SUM(ili.total_amount)FROM invoice_line_items ili WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')), 2) - Round(ifnull((SELECT SUM(pti.amount_used)FROM payment_to_invoice pti WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalInvoiceAmountDue,
+
+
+Concat('$', Round((mmrs.amount*(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), '0'))),2) +
+
+
+
+Round(ifnull((SELECT SUM(ili.total_amount)FROM invoice_line_items ili WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)
+- Round(ifnull((SELECT SUM(pti.amount_used)FROM payment_to_invoice pti WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalDue
+
+
+FROM customers c
+
+LEFT JOIN
+(
+SELECT key1 as CID,MAX(created_by) as mx_created_by FROM log
+WHERE table1 = 'customers'
+AND (action LIKE '%Customer Is Cancelled changed from <em>null</em> to true.%'
+OR action LIKE '%Customer Is Cancelled changed from false to true.%')
+group by key1
+) as DRV on DRV.CID = c.id
+
+LEFT JOIN customer_cancel_reasons ccr ON ccr.id = c.customer_cancel_reason_id
+LEFT JOIN mmrs ON c.mmr_id = mmrs.id
+LEFT JOIN locations loc ON c.location_id = loc.id
+LEFT JOIN terms t ON t.id = c.term_id
+LEFT JOIN invoices i ON i.entity_id = c.id AND i.entity_type = 'customer' AND i.status != 'recurring'
+LEFT JOIN invoice_line_items ili ON ili.invoice_id = i.id
+  WHERE c.status = 'active'   AND DATE_FORMAT(c.customer_cancel_date, '%Y-%m-%d') >= '2019-06-01'   AND DATE_FORMAT(c.customer_cancel_date, '%Y-%m-%d') <= '2019-06-18'    GROUP BY c.id  ORDER BY c.id DESC
+;
+[root@na01lstxdbp01 query_tuning]# cat orig_query_06192019.sql
+SELECT
+c.id AS TraxId,
+CONCAT(c.fname,' ',c.lname) AS Customer,
+DATE_FORMAT(c.sale_date, "%m/%d/%Y") AS CustomerSaleDate,
+loc.name AS OfficeLocation,
+DATE_FORMAT(c.customer_cancel_date, '%m/%d/%Y') as CancelDate,
+mmrs.amount AS MMR,
+c.rebate_check AS RebateAmount,
+CONCAT(t.months,' ','MONTHS') AS ContractTerm,
+
+CONCAT(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), ''),' ','MONTHS') AS MonthsRemaining,
+
+ifnull((SELECT MAX(l.created_by) FROM log l WHERE l.table1 = 'customers' AND l.key1 = c.id AND (l.action LIKE '%Customer Is Cancelled changed from <em>null</em> to true.%' OR l.action LIKE '%Customer Is Cancelled changed from false to true.%') ),'No Record') AS CanceledById,
+
+ccr.name AS CancellationReason,
+
+Concat('$', Round(ifnull((SELECT SUM(ili.total_amount)
+FROM invoice_line_items ili
+WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalInvoiceAmounts,
+
+Concat('$', Round(ifnull((SELECT SUM(pti.amount_used)
+FROM payment_to_invoice pti
+WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalPaymentToInvoiceAmounts,
+
+Concat('$', Round((mmrs.amount*(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), '0'))),2)) AS BOC,
+
+Concat('$', Round((SELECT SUM(ili.total_amount)FROM invoice_line_items ili WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')), 2) - Round(ifnull((SELECT SUM(pti.amount_used)FROM payment_to_invoice pti WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalInvoiceAmountDue,
+
+
+Concat('$', Round((mmrs.amount*(IF(c.sale_date IS NOT NULL,IF (t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d"))) < 0,'0',t.months-(TIMESTAMPDIFF(MONTH, c.sale_date, DATE_FORMAT(NOW(), "%Y-%m-%d")))), '0'))),2) +
+
+
+
+Round(ifnull((SELECT SUM(ili.total_amount)FROM invoice_line_items ili WHERE ili.status != 'deleted' AND ili.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)
+- Round(ifnull((SELECT SUM(pti.amount_used)FROM payment_to_invoice pti WHERE pti.status != 'deleted' AND pti.invoice_id IN(SELECT i.id FROM invoices i WHERE i.entity_type = 'customer' AND i.entity_id = c.id AND i.status != 'recurring' AND i.status != 'deleted')),0), 2)) AS TotalDue
+
+
+FROM customers c
+LEFT JOIN customer_cancel_reasons ccr ON ccr.id = c.customer_cancel_reason_id
+LEFT JOIN mmrs ON c.mmr_id = mmrs.id
+LEFT JOIN locations loc ON c.location_id = loc.id
+LEFT JOIN terms t ON t.id = c.term_id
+LEFT JOIN invoices i ON i.entity_id = c.id AND i.entity_type = 'customer' AND i.status != 'recurring'
+LEFT JOIN invoice_line_items ili ON ili.invoice_id = i.id
+  WHERE c.status = 'active'   AND DATE_FORMAT(c.customer_cancel_date, '%Y-%m-%d') >= '2019-06-01'   AND DATE_FORMAT(c.customer_cancel_date, '%Y-%m-%d') <= '2019-06-18'    GROUP BY c.id  ORDER BY c.id DESC
+;
+=========================================================================================================================================
+Explain plan for optimized query
++----+--------------------+-------+--------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------+---------+--------------------------------+-------+---------------------------------------------------------------------+
+| id | select_type        | table | type   | possible_keys                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | key                   | key_len | ref                            | rows  | Extra                                                               |
++----+--------------------+-------+--------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------+---------+--------------------------------+-------+---------------------------------------------------------------------+
+|  1 | PRIMARY            | c     | ref    | PRIMARY,status,sale_date,rep_id,is_installed,location_id,lead_type_id,lead_rep_id,lead_type_id_3,account_num,lname,account_type,lead_company_id,lead_type_id_2,lead_requested_count,lead_last_requested,status_2,adt_customer_number,adt_serial_man_status,analytics_type_analytics_id,created,lead_type_id_11,lead_queue_3,status_train_id,status_location_id_sale_date,phone1,phone2,phone3,phone4,install_appointment_id,location_id_rep_id_train_id,status_rep_id_sale_date | status                | 1       | const                          | 15131 | Using index condition; Using where; Using temporary; Using filesort |
+|  1 | PRIMARY            | ccr   | ALL    | PRIMARY                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | NULL                  | NULL    | NULL                           |     5 | Using where; Using join buffer (Block Nested Loop)                  |
+|  1 | PRIMARY            | mmrs  | eq_ref | PRIMARY                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | PRIMARY               | 4       | altx_selectsmart.c.mmr_id      |     1 | NULL                                                                |
+|  1 | PRIMARY            | loc   | eq_ref | PRIMARY                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | PRIMARY               | 4       | altx_selectsmart.c.location_id |     1 | NULL                                                                |
+|  1 | PRIMARY            | t     | eq_ref | PRIMARY                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | PRIMARY               | 4       | altx_selectsmart.c.term_id     |     1 | NULL                                                                |
+|  1 | PRIMARY            | i     | ref    | entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                           | entity_type_entity_id | 5       | const,altx_selectsmart.c.id    |     2 | Using where                                                         |
+|  1 | PRIMARY            | ili   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |     1 | Using index                                                         |
+| 13 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |     2 | Using index condition; Using where                                  |
+| 13 | DEPENDENT SUBQUERY | pti   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |     1 | Using where                                                         |
+| 11 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |     2 | Using index condition; Using where                                  |
+| 11 | DEPENDENT SUBQUERY | ili   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |     1 | Using where                                                         |
+|  9 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |     2 | Using index condition; Using where                                  |
+|  9 | DEPENDENT SUBQUERY | pti   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |     1 | Using where                                                         |
+|  7 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |     2 | Using index condition; Using where                                  |
+|  7 | DEPENDENT SUBQUERY | ili   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |     1 | Using where                                                         |
+|  5 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |     2 | Using index condition; Using where                                  |
+|  5 | DEPENDENT SUBQUERY | pti   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |     1 | Using where                                                         |
+|  3 | DEPENDENT SUBQUERY | i     | ref    | PRIMARY,entity_type_entity_id                                                                                                                                                                                                                                                                                                                                                                                                                                                   | entity_type_entity_id | 5       | const,func                     |     2 | Using index condition; Using where                                  |
+|  3 | DEPENDENT SUBQUERY | ili   | ref    | invoice_id                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | invoice_id            | 4       | altx_selectsmart.i.id          |     1 | Using where                                                         |
+|  2 | DEPENDENT SUBQUERY | l     | ref    | table1,key1,table1_2,table1_3                                                                                                                                                                                                                                                                                                                                                                                                                                                   | key1                  | 4       | func                           |     1 | Using index condition; Using where                                  |
++----+--------------------+-------+--------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------------------+---------+--------------------------------+-------+---------------------------------------------------------------------+
+20 rows in set (0.01 sec)
+
+As you can see that number of estimated rows scanned for last entry in explain is reduced a lot and index on "key1" is used so optimized query
+is more efficient.
