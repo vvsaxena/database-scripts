@@ -41,7 +41,9 @@ AND (u.active)  = 'true'
 AND (IF((SELECT COUNT(*) FROM user_to_location_permissions WHERE user_to_location_permissions.user_id = u.id AND user_to_location_permissions.istech > 0) > 0,  'true',  'false'))  = 'true'
 ORDER BY u.id DESC
 ;
-Optmized Query
+=========================================================================================================================================
+Optmized Query 1
+
 SELECT u.id AS ID,
 u.fname AS FirstName,
 u.lname AS LastName,
@@ -142,3 +144,106 @@ AND DRVPERM.totrec > 0
 ORDER BY u.id DESC
 ;
 ====================================================================================================================================
+Optimized Query 2
+
+SELECT u.id AS ID,
+u.fname AS FirstName,
+u.lname AS LastName,
+u.username AS Username,
+u.email AS Email,
+u.cell_phone AS CellPhone,
+u.home_phone AS HomePhone,
+u.address AS Address,
+u.active AS Active,
+(SELECT l.action FROM log l WHERE l.id = DRVLOGIN.drvalid) AS ActiveUpdated,
+u.login AS CanLogin,
+(SELECT l.action FROM log l WHERE l.id =DRVLOGIN.drvllid) AS LoginUpdated,
+DRVREP.drnumber AS RepNumbers,
+u.in_payroll AS InPayroll,
+u.ssn AS SSN,
+DATE_FORMAT(u.hire_date, '%m/%d/%Y') AS HireDate,
+DATE_FORMAT(u.last_date, '%m/%d/%Y') AS LastDate,
+(SELECT GROUP_CONCAT(DISTINCT l.name ORDER BY l.name ASC SEPARATOR '\n') FROM user_to_location_permissions utlp LEFT JOIN locations l on l.id = utlp.location_id WHERE utlp.user_id = u.id) AS Locations,
+DRVOBJ.drvname AS UserTags,
+u.tech_coverage_radius AS TechRadius,
+DRVRESTRICT.drval AS StateRestrictions,
+mg.name AS MarketingGroup,
+u.payroll_identifier AS PayrollIdentifier,
+u.tech_start_address AS TechAddress,
+u.tech_start_city AS TechCity,
+u.tech_start_state AS TechState,
+u.tech_start_zip AS TechZip,
+u.shipping_street AS ShippingAddress,
+u.shipping_city AS ShippingCity,
+u.shipping_state AS ShippingState,
+u.shipping_zip AS ShippingZip,
+u.fax AS Fax
+
+FROM users u
+LEFT JOIN
+(select ID as drvid,max(ALID) as drvalid,max(LLID) as drvllid
+from
+(
+select a.id as ID,max(case when l.action like '%active%' then l.id else NULL end) as ALID,
+max(case when l.action like '%login%' then l.id else NULL end) as LLID
+from users a
+LEFT JOIN log l on a.id = l.key1
+where l.table1='users'
+group by a.id
+
+union all
+
+select a.id as ID,max(case when l.action like '%active%' then l.id else NULL end) as ALID,
+max(case when l.action like '%login%' then l.id else NULL end) as LLID
+from users a
+LEFT JOIN log l on a.id = l.key2
+where l.table2='users'
+group by a.id
+) as t_union
+group by ID
+) as DRVLOGIN on u.id = DRVLOGIN.drvid
+
+LEFT JOIN
+( select user_id as drvid, GROUP_CONCAT(restrict_value SEPARATOR ', ') as drval
+from user_tech_restrictions
+group by user_id
+) as DRVRESTRICT on u.id = DRVRESTRICT.drvid
+
+LEFT JOIN
+(
+SELECT user_id as drvid,COUNT(*) as totrec
+FROM user_to_location_permissions
+WHERE istech > 0
+group by user_id
+) as DRVPERM on u.id = DRVPERM.drvid
+
+LEFT JOIN
+(
+SELECT user_id as drvid,GROUP_CONCAT(number ORDER BY number ASC SEPARATOR ',') AS drnumber
+FROM user_rep_numbers
+WHERE status='active'
+group by user_id
+) as DRVREP on u.id = DRVREP.drvid
+
+LEFT JOIN
+(
+SELECT ot.object_id as objid,GROUP_CONCAT(t.name ORDER BY t.name ASC SEPARATOR ', ') as drvname FROM tags t LEFT JOIN object_tags ot ON t.id = ot.tag_id WHERE t.object_type = 'user' AND ot.status='active'
+group by ot.object_id
+) as DRVOBJ on u.id = DRVOBJ.objid
+
+LEFT JOIN
+(
+select utlp.user_id as drvid,GROUP_CONCAT(DISTINCT l.name ORDER BY l.name ASC SEPARATOR '\n') as drvname
+from user_to_location_permissions utlp LEFT JOIN locations l on l.id = utlp.location_id
+group by utlp.user_id
+) as DRVUTLP on u.id = DRVUTLP.drvid
+
+
+
+LEFT JOIN marketing_groups mg ON u.marketing_group_id = mg.id
+WHERE u.status = 'active'
+AND (u.active)  = 'true'
+AND DRVPERM.totrec > 0
+ORDER BY u.id DESC
+;
+===================================================================================================================================
