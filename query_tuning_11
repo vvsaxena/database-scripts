@@ -1,0 +1,37 @@
+Original Query took 12 minutes
+========================================================================================================================================
+SELECT *
+FROM customers c
+WHERE sale_date > '0000-00-00'
+AND ((location_id = 1
+AND (( c.id IN (SELECT customer_id FROM tech_schedule ts WHERE ts.user_id='27388' AND ts.customer_id=c.id AND ts.status='active') ))))
+AND status = 'active'
+AND c.id IN (
+                SELECT DISTINCT(customer_id)
+                FROM tech_schedule
+                WHERE status = 'active'
+
+
+                 AND start_time >= 1561701600
+                 AND start_time < 1562306400  )
+ORDER BY sale_date DESC, created DESC, id DESC LIMIT 0, 51
+;
+========================================================================================================================================
+Optimized Query took 2 seconds
+
+SELECT c.*
+FROM customers c
+inner join
+(
+select distinct(customer_id) as custid
+from tech_schedule
+where status='active'
+AND start_time >= 1561701600
+AND start_time < 1562306400  ) as X on c.id = X.custid
+
+WHERE sale_date > '0000-00-00'
+AND (( location_id = 1
+AND (( c.id IN (SELECT customer_id FROM tech_schedule ts WHERE ts.user_id='27388' AND ts.customer_id=c.id AND ts.status='active') ))))
+ORDER BY sale_date DESC, created DESC, id DESC LIMIT 0, 51
+;
+=======================================================================================================================================
