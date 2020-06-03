@@ -1,0 +1,178 @@
+Original Query took ~24s
+==========================================================================================================================================
+SELECT
+ptc.entity_id as EntityID,
+c.rep_id as RepId,
+CONCAT(c.fname,' ',c.lname) as Customer,
+ptc.amount as Amount,
+ptc.amount_paid as AmountPaid,
+IF(DATE_FORMAT(ptc.paid_date, '%m/%d/%Y') = '00/00/0000' , '', DATE_FORMAT(ptc.paid_date, '%m/%d/%Y')) as PayDate,
+pps.name as PaymentStatus,
+ptc.notes as Notes,
+FROM_UNIXTIME(ts.start_time, '%m/%d/%Y') as CustomerInstallDate,
+(SELECT GROUP_CONCAT(t.name ORDER BY t.name ASC SEPARATOR ', ') FROM tags t LEFT JOIN object_tags ot ON t.id = ot.tag_id WHERE c.id = ot.object_id AND t.object_type = 'customer' AND ot.status = 'active') AS Tags,
+c.state as State,
+IF(c.account_type = "Commercial",
+CASE
+WHEN (SELECT @Beacon := AES_DECRYPT(c.beacon_score, 'XXXXXXXXX')) > 624 THEN "COMM PG"
+WHEN @Beacon > 99 THEN "COMM DMR"
+ELSE "COMM"
+END,
+CASE
+WHEN (SELECT @Beacon := AES_DECRYPT(c.beacon_score, 'XXXXXXXX')) > 6000 THEN "BULK"
+WHEN @Beacon > 774 THEN "A+"
+WHEN @Beacon > 724 THEN "A"
+WHEN @Beacon > 699 THEN "B | I ok"
+WHEN @Beacon > 674 THEN "B"
+WHEN @Beacon > 649 THEN "B-"
+WHEN @Beacon > 624 THEN "D"
+WHEN @Beacon > 599 THEN "E"
+WHEN @Beacon > 574 THEN "BULK"
+WHEN @Beacon > 524 THEN "CONTRACT"
+ELSE "DMR"
+END) as CreditGrade,
+m.amount as MMR,
+CONCAT(pr.name,' | ',prf.name) as PayrollRoleFunction,
+fs.name as CustomerFundingStatus,
+IF(DATE_FORMAT(c.fund_submitted_date, '%m/%d/%Y') = '00/00/0000' , '', DATE_FORMAT(c.fund_submitted_date, '%m/%d/%Y')) as CustomerFundSubmissionDate,
+CONCAT(rep.fname,' ',rep.lname) as SalesRep,
+lcc.name as LeadCompanyCampaign,
+IF(DATE_FORMAT(ptc.created_at, '%m/%d/%Y') = '00/00/0000' , '', DATE_FORMAT(ptc.created_at, '%m/%d/%Y')) as EntryDate,
+lc.name as LeadCompany,
+IF(DATE_FORMAT(c.sale_date, '%m/%d/%Y') = '00/00/0000' , '', DATE_FORMAT(c.sale_date, '%m/%d/%Y')) as CustomerSaleDate,
+CONCAT(train.fname,' ',train.lname) as 'Train(ee/er)',
+IF(DATE_FORMAT(c.fund_funded_date, '%m/%d/%Y') = '00/00/0000' , '', DATE_FORMAT(c.fund_funded_date, '%m/%d/%Y')) as CustomerFundedDate,
+prfl.name as Level,
+c.address1 as CustomerAddress,
+ptc.id as PayrollToCustomerID,
+loc.name as OfficeLocation,
+rep.active as SalesRepActive,
+c.account_num as CustomerAccount,
+mp.name as MonitoringPlan,
+plm.entity_type as EntityPayrollIdentifier,
+CONCAT(c.city,', ',c.state,' ',c.zip) as CityStateZip,
+c.id as ID,
+c.lead_company_unique_id as LeadCompanyUniqueID,
+c.adt_serial_man as CustomerADTSerialMan,
+f.name AS Funder
+FROM payroll_to_customer ptc
+JOIN payroll_role_functions prf ON prf.id = ptc.payroll_role_function_id
+JOIN `altx_global`.`payroll_list_methods` plm ON prf.payroll_list_method_id = plm.id
+JOIN `altx_global`.`payroll_roles` pr ON plm.payroll_role_id = pr.id
+LEFT JOIN customers c ON ptc.customer_id = c.id
+LEFT JOIN altx_global.payroll_payment_status pps ON pps.id = ptc.payroll_payment_status_id
+LEFT JOIN payroll_role_function_levels prfl ON prfl.id = ptc.payroll_role_function_level_id
+LEFT JOIN tech_schedule ts ON c.install_appointment_id = ts.id
+LEFT JOIN users rep ON c.rep_id = rep.id
+LEFT JOIN users t ON t.id = ptc.entity_id
+LEFT JOIN users train ON train.id = c.train_id
+LEFT JOIN lead_companies lc ON lc.id = ptc.entity_id
+LEFT JOIN lead_company_campaigns lcc ON lcc.id = c.lead_company_campaign_id
+LEFT JOIN locations loc ON loc.id = c.location_id
+LEFT JOIN mmrs m ON m.id = c.mmr_id
+LEFT JOIN altx_global.monitoring_plans mp ON mp.id = c.monitoring_plan_id
+LEFT JOIN altx_global.funding_status fs ON fs.id = c.funding_status_id
+LEFT JOIN funders f ON c.funder_id = f.id
+WHERE ptc.combo_id = CONCAT('lead_company-', '2906')
+AND ptc.status = 'active'
+AND c.status='active'
+AND c.sale_date > '0000-00-00' 
+ORDER BY 
+t.lname ASC, ptc.id  DESC
+;
+========================================================================================================================================
+Optimized Query took ~.01s
+
+SELECT
+ptc.entity_id as EntityID,
+c.rep_id as RepId,
+CONCAT(c.fname,' ',c.lname) as Customer,
+ptc.amount as Amount,
+ptc.amount_paid as AmountPaid,
+IF(DATE_FORMAT(ptc.paid_date, '%m/%d/%Y') = '00/00/0000' , '', DATE_FORMAT(ptc.paid_date, '%m/%d/%Y')) as PayDate,
+pps.name as PaymentStatus,
+ptc.notes as Notes,
+FROM_UNIXTIME(ts.start_time, '%m/%d/%Y') as CustomerInstallDate,
+(SELECT GROUP_CONCAT(t.name ORDER BY t.name ASC SEPARATOR ', ') FROM tags t LEFT JOIN object_tags ot ON t.id = ot.tag_id WHERE c.id = ot.object_id AND t.object_type = 'customer' AND ot.status = 'active') AS Tags,
+c.state as State,
+IF(DRVD1.id > 0,
+CASE
+WHEN DRVD1.bscore > 624 THEN "COMM PG"
+WHEN DRVD1.bscore > 99 THEN "COMM DMR"
+ELSE "COMM"
+END,
+CASE
+WHEN DRVD2.bscore > 6000 THEN "BULK"
+WHEN DRVD2.bscore > 774 THEN "A+"
+WHEN DRVD2.bscore > 724 THEN "A"
+WHEN DRVD2.bscore > 699 THEN "B | I ok"
+WHEN DRVD2.bscore > 674 THEN "B"
+WHEN DRVD2.bscore > 649 THEN "B-"
+WHEN DRVD2.bscore > 624 THEN "D"
+WHEN DRVD2.bscore > 599 THEN "E"
+WHEN DRVD2.bscore > 574 THEN "BULK"
+WHEN DRVD2.bscore > 524 THEN "CONTRACT"
+ELSE "DMR"
+END) as CreditGrade,
+m.amount as MMR,
+CONCAT(pr.name,' | ',prf.name) as PayrollRoleFunction,
+fs.name as CustomerFundingStatus,
+IF(DATE_FORMAT(c.fund_submitted_date, '%m/%d/%Y') = '00/00/0000' , '', DATE_FORMAT(c.fund_submitted_date, '%m/%d/%Y')) as CustomerFundSubmissionDate,
+CONCAT(rep.fname,' ',rep.lname) as SalesRep,
+lcc.name as LeadCompanyCampaign,
+IF(DATE_FORMAT(ptc.created_at, '%m/%d/%Y') = '00/00/0000' , '', DATE_FORMAT(ptc.created_at, '%m/%d/%Y')) as EntryDate,
+lc.name as LeadCompany,
+IF(DATE_FORMAT(c.sale_date, '%m/%d/%Y') = '00/00/0000' , '', DATE_FORMAT(c.sale_date, '%m/%d/%Y')) as CustomerSaleDate,
+CONCAT(train.fname,' ',train.lname) as 'Train(ee/er)',
+IF(DATE_FORMAT(c.fund_funded_date, '%m/%d/%Y') = '00/00/0000' , '', DATE_FORMAT(c.fund_funded_date, '%m/%d/%Y')) as CustomerFundedDate,
+prfl.name as Level,
+c.address1 as CustomerAddress,
+ptc.id as PayrollToCustomerID,
+loc.name as OfficeLocation,
+rep.active as SalesRepActive,
+c.account_num as CustomerAccount,
+mp.name as MonitoringPlan,
+plm.entity_type as EntityPayrollIdentifier,
+CONCAT(c.city,', ',c.state,' ',c.zip) as CityStateZip,
+c.id as ID,
+c.lead_company_unique_id as LeadCompanyUniqueID,
+c.adt_serial_man as CustomerADTSerialMan,
+f.name AS Funder
+FROM payroll_to_customer ptc
+JOIN payroll_role_functions prf ON prf.id = ptc.payroll_role_function_id
+JOIN `altx_global`.`payroll_list_methods` plm ON prf.payroll_list_method_id = plm.id
+JOIN `altx_global`.`payroll_roles` pr ON plm.payroll_role_id = pr.id
+LEFT JOIN customers c ON ptc.customer_id = c.id
+LEFT JOIN altx_global.payroll_payment_status pps ON pps.id = ptc.payroll_payment_status_id
+LEFT JOIN payroll_role_function_levels prfl ON prfl.id = ptc.payroll_role_function_level_id
+LEFT JOIN tech_schedule ts ON c.install_appointment_id = ts.id
+LEFT JOIN users rep ON c.rep_id = rep.id
+LEFT JOIN users t ON t.id = ptc.entity_id
+LEFT JOIN users train ON train.id = c.train_id
+LEFT JOIN lead_companies lc ON lc.id = ptc.entity_id
+LEFT JOIN lead_company_campaigns lcc ON lcc.id = c.lead_company_campaign_id
+LEFT JOIN locations loc ON loc.id = c.location_id
+LEFT JOIN mmrs m ON m.id = c.mmr_id
+LEFT JOIN altx_global.monitoring_plans mp ON mp.id = c.monitoring_plan_id
+LEFT JOIN altx_global.funding_status fs ON fs.id = c.funding_status_id
+LEFT JOIN funders f ON c.funder_id = f.id
+LEFT JOIN
+(
+select id,AES_DECRYPT(beacon_score,'XXXX') as bscore
+FROM customers
+WHERE account_type = "Commercial" and AES_DECRYPT(beacon_score, 'XXXXXX') > 99
+) AS DRVD1 on ptc.id = DRVD1.id
+LEFT JOIN
+(
+select id,AES_DECRYPT(beacon_score,'XXXXX') as bscore
+FROM customers
+WHERE account_type != "Commercial" and AES_DECRYPT(beacon_score, 'XXXXXXXX') > 524
+) AS DRVD2 on ptc.id = DRVD2.id
+WHERE ptc.combo_id = CONCAT('lead_company-', '2906')
+AND ptc.status = 'active'
+AND c.status='active'
+AND c.sale_date > '0000-00-00'
+ORDER BY
+t.lname ASC, ptc.id  DESC
+;
+=====================================================================================================================================
