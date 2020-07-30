@@ -1,0 +1,27 @@
+By using derived table the response time was reduced from 5 minutes to 0.27 seconds
+Original Query
+=================================================================================================================================================================
+SELECT COUNT(cn.id) AS 'open_work_orders',
+        IFNULL(SUM(IF((SELECT COUNT(ce.id) FROM calendar_events ce WHERE ce.customer_note_id = cn.id AND ce.status = 'active' AND ce.calendar_category = 'tech_schedule') > 0,1,0)),0) AS 'scheduled',
+        IFNULL(SUM(IF((SELECT COUNT(ce.id) FROM calendar_events ce WHERE ce.customer_note_id = cn.id AND ce.status = 'active' AND ce.calendar_category = 'tech_schedule') > 0,0,1)),0) AS 'not_scheduled',
+        IFNULL(SUM(IF(cn.follow_up_date > CONVERT_TZ(NOW(),'US/Mountain',IFNULL(c.timezone,'US/Mountain')),0,1)),0) AS 'overdue'
+        FROM customer_notes cn
+        JOIN customers c ON cn.customer_id = c.id
+        WHERE cn.is_work_order = 1
+        AND cn.ticket_type_id != 2
+        AND cn.deleted_at IS NULL
+        
+       ===================================================================================================================================================================
+       Optimized Query
+       SELECT COUNT(cn.id) AS 'open_work_orders',
+        IFNULL(SUM(IF((DRVTMP.IDCOUNT) > 0,1,0)),0) AS 'scheduled',
+        IFNULL(SUM(IF((DRVTMP.IDCOUNT) > 0,0,1)),0) AS 'not_scheduled',
+        IFNULL(SUM(IF(cn.follow_up_date > CONVERT_TZ(NOW(),'US/Mountain',IFNULL(c.timezone,'US/Mountain')),0,1)),0) AS 'overdue'
+        FROM customer_notes cn
+        JOIN customers c ON cn.customer_id = c.id
+        LEFT JOIN
+        (SELECT a.customer_note_id as ID,COUNT(a.id) as IDCOUNT FROM calendar_events a, customer_notes b  WHERE a.customer_note_id = b.id and  a.status = 'active' AND a.calendar_category = 'tech_schedule' group by a.customer_note_id) as DRVTMP on cn.id = DRVTMP.ID
+        WHERE cn.is_work_order = 1
+        AND cn.ticket_type_id != 2
+        AND cn.deleted_at is NULL
+        =================================================================================================================================================================
