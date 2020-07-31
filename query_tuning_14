@@ -1,0 +1,97 @@
+Original Query taking 7+ hours
+=========================================================================================================================================
+SELECT
+ c.id AS ID
+,CONCAT(c.lname,', ',c.fname) AS Customer
+,CONCAT(c.lname,', ',c.fname) AS Name
+,c.account_num AS Account_Number
+,DATE_FORMAT(FROM_UNIXTIME(ts.start_time),'%m/%d/%Y') AS Install_Date
+,DATE_FORMAT(c.fund_funded_date,'%m/%d/%Y') AS Fund_Date
+,DATE_FORMAT(c.fund_funded_date,'%m/%d/%Y') AS Chargeback_Date
+,DATE_FORMAT(c.fund_reversal_date,'%m/%d/%Y') AS Reversal_Date
+,c.is_installed AS Install_Status
+,c.customer_is_cancelled AS Cxl_Status
+,DATE_FORMAT(c.customer_cancel_date,'%m/%d/%Y') AS Cxl_Date
+,ccr.name AS Cxl_Reason
+,(SELECT DATE_FORMAT(car.created_at,'%m/%d/%Y') FROM customer_at_risk car WHERE car.customer_id = c.id ORDER BY car.id ASC LIMIT 1) AS First_Aging_Date
+,CONCAT(rep.lname,', ',rep.fname) AS Sales_Person
+,lc.name AS Partner_Company
+,(SELECT GROUP_CONCAT(t.name) FROM object_tags ot LEFT JOIN tags t ON t.id = ot.tag_id WHERE t.object_type = 'lead_company' AND ot.object_id = lc.id) AS Partner_Company_Tag
+,af.amount AS Activation_Fee
+
+
+,(SELECT GROUP_CONCAT(DISTINCT cpt.name) FROM customer_payment_types cpt WHERE cpt.id IN (SELECT DISTINCT cp.customer_payment_type_id FROM customer_payments cp WHERE cp.customer_id = c.id AND cp.status = 'active')) AS Payment_Type
+,IF(c.service_invoicing,'true','false') AS Invoicing_Service_Type
+,(SELECT SUM(ptcc.amount) FROM payroll_to_customer ptc JOIN payroll_to_customer_columns ptcc ON ptcc.payroll_to_customer_id = ptc.id WHERE ptc.customer_id = c.id AND ptc.payroll_role_id IN(1, 5) AND ptc.status='active' AND ptcc.status='active' AND ptcc.payroll_column_id IN(3, 11) ) AS Upsales
+,(SELECT SUM(ce.equipment_points) FROM customer_equipment ce WHERE ce.customer_id = c.id AND ce.status = 'active') AS Equipment_Points
+,(SELECT IF(SUM(ce.id) > 0,'yes','no') FROM customer_equipment ce WHERE ce.customer_id = c.id AND ce.status = 'active' AND ce.equipment_id IN (SELECT e.id FROM equipment e WHERE e.name LIKE '%camera%' AND e.status = 'active')) AS Cameras
+
+
+,c.id AS Trax_ID
+,c.adt_serial_man AS Serial_Man
+
+  FROM customers c
+LEFT JOIN tech_schedule ts ON ts.id = c.install_appointment_id
+LEFT JOIN customer_cancel_reasons ccr ON ccr.id = c.customer_cancel_reason_id
+LEFT JOIN users rep ON rep.id = c.rep_id
+LEFT JOIN lead_companies lc ON lc.id = c.lead_company_id
+LEFT JOIN activation_fee af ON af.id = c.activation_fee_id
+LEFT JOIN mmrs mmr on mmr.id = c.mmr_id
+  WHERE c.sale_date <> '0000-00-00'
+AND c.id in (5467506,5482411,5516686,5533341,5579397,5614842,5692700,5713740,6762335)
+AND c.status = 'active'   AND DATE_FORMAT(c.sale_date, '%Y-%m-%d') >= '2019-07-01'   AND DATE_FORMAT(c.sale_date, '%Y-%m-%d') <= '2020-07-01'    HAVING First_Aging_Date > '0000-00-00'
+;
+
+=============================================================================================================================================================================
+Optimized Query taking only 20 seconds
+
+SELECT
+ c.id AS ID
+,CONCAT(c.lname,', ',c.fname) AS Customer
+,CONCAT(c.lname,', ',c.fname) AS Name
+,c.account_num AS Account_Number
+,DATE_FORMAT(FROM_UNIXTIME(ts.start_time),'%m/%d/%Y') AS Install_Date
+,DATE_FORMAT(c.fund_funded_date,'%m/%d/%Y') AS Fund_Date
+,DATE_FORMAT(c.fund_funded_date,'%m/%d/%Y') AS Chargeback_Date
+,DATE_FORMAT(c.fund_reversal_date,'%m/%d/%Y') AS Reversal_Date
+,c.is_installed AS Install_Status
+,c.customer_is_cancelled AS Cxl_Status
+,DATE_FORMAT(c.customer_cancel_date,'%m/%d/%Y') AS Cxl_Date
+,ccr.name AS Cxl_Reason
+,DRVTMP.MINDATE AS First_Aging_Date
+,CONCAT(rep.lname,', ',rep.fname) AS Sales_Person
+,lc.name AS Partner_Company
+,(SELECT GROUP_CONCAT(t.name) FROM object_tags ot LEFT JOIN tags t ON t.id = ot.tag_id WHERE t.object_type = 'lead_company' AND ot.object_id = lc.id) AS Partner_Company_Tag
+,af.amount AS Activation_Fee
+
+
+,(SELECT GROUP_CONCAT(DISTINCT cpt.name) FROM customer_payment_types cpt WHERE cpt.id IN (SELECT DISTINCT cp.customer_payment_type_id FROM customer_payments cp WHERE cp.customer_id = c.id AND cp.status = 'active')) AS Payment_Type
+,IF(c.service_invoicing,'true','false') AS Invoicing_Service_Type
+,(SELECT SUM(ptcc.amount) FROM payroll_to_customer ptc JOIN payroll_to_customer_columns ptcc ON ptcc.payroll_to_customer_id = ptc.id WHERE ptc.customer_id = c.id AND ptc.payroll_role_id IN(1, 5) AND ptc.status='active' AND ptcc.status='active' AND ptcc.payroll_column_id IN(3, 11) ) AS Upsales
+,(SELECT SUM(ce.equipment_points) FROM customer_equipment ce WHERE ce.customer_id = c.id AND ce.status = 'active') AS Equipment_Points
+,(SELECT IF(SUM(ce.id) > 0,'yes','no') FROM customer_equipment ce WHERE ce.customer_id = c.id AND ce.status = 'active' AND ce.equipment_id IN (SELECT e.id FROM equipment e WHERE e.name LIKE '%camera%' AND e.status = 'active')) AS Cameras
+
+
+,c.id AS Trax_ID
+,c.adt_serial_man AS Serial_Man
+
+  FROM customers c
+LEFT JOIN tech_schedule ts ON ts.id = c.install_appointment_id
+LEFT JOIN customer_cancel_reasons ccr ON ccr.id = c.customer_cancel_reason_id
+LEFT JOIN users rep ON rep.id = c.rep_id
+LEFT JOIN lead_companies lc ON lc.id = c.lead_company_id
+LEFT JOIN activation_fee af ON af.id = c.activation_fee_id
+LEFT JOIN mmrs mmr on mmr.id = c.mmr_id
+LEFT JOIN
+(select a.id as ID,DATE_FORMAT(min(b.created_at),'%m/%d/%Y') as MINDATE FROM customers a, customer_at_risk b
+where a.id = b.customer_id
+AND a.sale_date <> '0000-00-00'
+AND a.status = 'active'   AND DATE_FORMAT(a.sale_date, '%Y-%m-%d') >= '2019-07-01'   AND DATE_FORMAT(a.sale_date, '%Y-%m-%d') <= '2020-07-01'
+group by a.id
+) as DRVTMP on c.id = DRVTMP.ID
+
+  WHERE c.sale_date <> '0000-00-00'
+AND c.status = 'active'   AND DATE_FORMAT(c.sale_date, '%Y-%m-%d') >= '2019-07-01'   AND DATE_FORMAT(c.sale_date, '%Y-%m-%d') <= '2020-07-01'    HAVING First_Aging_Date > '0000-00-00'
+;
+
+======================================================================================================================================================================
