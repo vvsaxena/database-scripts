@@ -1,0 +1,39 @@
+Requirement : for utf8mb4 conversions the existing data needs to be converted for every character type of column in every table. This problem required
+              multiple updates for each column on same table which is very time consuming like this
+
+              update customers set fname=UNHEX(HEX(CONVERT(`fname` using latin1))) where id=<Primary key>
+              update customers set lname=UNHEX(HEX(CONVERT(`lname` using latin1))) where id =<Primary key>
+
+              The solution to merge all update statements to single one is creating a temporary table which stores the details of primary key and distinctive 
+              conditions like 'fname'/'lname' etc etc and make use of the distinctive condition in single update statement.
+
+              CREATE table utilities._altx_sandbox_users_fixids(
+              `id` int(10) unsigned NOT NULL, 
+              table_name varchar(200) not NULL , 
+              colname varchar(100) NOT NULL, 
+              PRIMARY KEY(`id`) 
+              );
+
+              Now find out what records/primary keys needs to be updated and store them in temporary table
+
+              	SELECT '=========================================================================================================';
+		SELECT 'PROCESSING users.fname ';
+		et @dt1=now();
+    
+		insert into utilities._altx_sandbox_users_fixids
+		select id,'users','fname' from altx_sandbox.users WHERE CHAR_LENGTH(fname) != LENGTH(fname)
+		on duplicate key update table_name='users' , colname=concat(colname,'-','fname');
+
+		delete from utilities._altx_sandbox_users_fixids where table_name='users' and instr(colname,'fname') > 0 
+		and id in ( select id from altx_sandbox.users WHERE UNHEX(HEX(CONVERT(fname using latin1))) != fname and UNHEX(HEX(CONVERT(fname using latin1))) != CONVERT(BINARY CONVERT(fname USING latin1) USING utf8) );
+		select 'Total Time Spent : ' , timediff(now(),@dt1);
+
+                Finally run the single update statement 
+
+		UPDATE altx_sandbox.users T1 INNER JOIN  utilities._altx_sandbox_users_fixids as T2 ON T1.id = T2.id  SET
+		T1.`fname` = case when ((instr(T2.colname,'fname') > 0)) then UNHEX(HEX(CONVERT(T1.`fname` using latin1))) ELSE T1.`fname` END,
+		T1.`lname` = case when ((instr(T2.colname,'lname') > 0)) then UNHEX(HEX(CONVERT(T1.`lname` using latin1))) ELSE T1.`lname` END,
+		T1.`address` = case when ((instr(T2.colname,'address') > 0)) then UNHEX(HEX(CONVERT(T1.`address` using latin1))) ELSE T1.`address` END
+		;
+
+
